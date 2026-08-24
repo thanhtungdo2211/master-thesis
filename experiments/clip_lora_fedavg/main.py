@@ -30,41 +30,51 @@ def main(argv=None):
     os.makedirs(args.out_dir, exist_ok=True)
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
+    ckpt_path = os.path.join(args.out_dir, "checkpoint.pt")
+    resume = (not args.fresh) and os.path.exists(ckpt_path)
+
     # ---------------- data ----------------
     splits = load_annotations(args.root)
     train_items = splits["train"]
     test_items = splits.get("test", splits.get("val"))
     print(f"[data] train {len(train_items)} images | test {len(test_items)} images")
 
-    if args.partition_file:
+    if resume:
+        # Reuse the exact partition from the interrupted run instead of rebuilding it,
+        # so resumed training sees exactly the same clients/data as before.
+        with open(os.path.join(args.out_dir, "partition.json")) as f:
+            partition = json.load(f)
+        print(f"[resume] loaded existing partition from {args.out_dir}/partition.json "
+              f"({len(partition)} clients)")
+    elif args.partition_file:
         with open(args.partition_file) as f:
             partition = {k: list(v) for k, v in json.load(f).items()}
     else:
         partition = build_partition(train_items, args.partition, args.num_clients,
                                     args.dirichlet_alpha, args.seed)
 
-    if args.select_clients:
-        keep = [c.strip() for c in args.select_clients.split(",") if c.strip()]
-        missing = [c for c in keep if c not in partition]
-        if missing:
-            raise ValueError(
-                f"--select_clients references unknown client ids: {missing}. "
-                f"Valid clients: {sorted(partition.keys())}"
-            )
-        dropped = set(partition.keys()) - set(keep)
-        partition = {c: partition[c] for c in keep}
-        print(f"[select_clients] keeping {keep}, dropping {len(dropped)} clients "
-              f"({sorted(dropped)}) -> {sum(len(v) for v in partition.values())} train images")
+        if args.select_clients:
+            keep = [c.strip() for c in args.select_clients.split(",") if c.strip()]
+            missing = [c for c in keep if c not in partition]
+            if missing:
+                raise ValueError(
+                    f"--select_clients references unknown client ids: {missing}. "
+                    f"Valid clients: {sorted(partition.keys())}"
+                )
+            dropped = set(partition.keys()) - set(keep)
+            partition = {c: partition[c] for c in keep}
+            print(f"[select_clients] keeping {keep}, dropping {len(dropped)} clients "
+                  f"({sorted(dropped)}) -> {sum(len(v) for v in partition.values())} train images")
 
-    rows, summary = partition_stats(partition, train_items)
-    print(f"[partition] {args.partition} -> {summary['n_clients']} clients | "
-          f"images/client {summary['images_min']}-{summary['images_max']} "
-          f"(mean {summary['images_mean']:.0f}, CV {summary['cv_images']:.3f}) | "
-          f"mean pairwise pid Jaccard {summary['mean_pairwise_jaccard_pid']:.3f}")
-    with open(os.path.join(args.out_dir, "partition_stats.json"), "w") as f:
-        json.dump({"summary": summary, "clients": rows}, f, indent=2)
-    with open(os.path.join(args.out_dir, "partition.json"), "w") as f:
-        json.dump(partition, f)
+        rows, summary = partition_stats(partition, train_items)
+        print(f"[partition] {args.partition} -> {summary['n_clients']} clients | "
+              f"images/client {summary['images_min']}-{summary['images_max']} "
+              f"(mean {summary['images_mean']:.0f}, CV {summary['cv_images']:.3f}) | "
+              f"mean pairwise pid Jaccard {summary['mean_pairwise_jaccard_pid']:.3f}")
+        with open(os.path.join(args.out_dir, "partition_stats.json"), "w") as f:
+            json.dump({"summary": summary, "clients": rows}, f, indent=2)
+        with open(os.path.join(args.out_dir, "partition.json"), "w") as f:
+            json.dump(partition, f)
 
     # ---------------- model ----------------
     model, tokenizer, info = build_model(args)
@@ -85,24 +95,35 @@ def main(argv=None):
     }
 
     scaler = torch.amp.GradScaler("cuda") if (args.amp and device == "cuda") else None
-    global_state = trainable_state_dict(model)
 
-    # ---------------- logging ----------------
+    # ---------------- logging / resume state ----------------
     log_path = os.path.join(args.out_dir, "log.csv")
-    with open(log_path, "w", newline="") as f:
-        csv.writer(f).writerow(
-            ["round", "loss", "R@1", "R@5", "R@10", "mAP", "mINP",
-             "cum_uplink_MB", "elapsed_s"])
     with open(os.path.join(args.out_dir, "args.json"), "w") as f:
         json.dump({**vars(args), **info}, f, indent=2)
 
-    best_r1, t0, cum_uplink = 0.0, time.time(), 0.0
+    if resume:
+        ckpt = torch.load(ckpt_path, map_location="cpu", weights_only=False)
+        global_state = ckpt["global_state"]
+        start_round = ckpt["round"] + 1
+        best_r1 = ckpt["best_r1"]
+        cum_uplink = ckpt["cum_uplink"]
+        t0 = time.time() - ckpt["elapsed_s"]
+        print(f"[resume] continuing from round {start_round}/{args.rounds} "
+              f"(best R@1 so far {best_r1:.2f}, uplink so far {cum_uplink/1024:.2f} GB)")
+    else:
+        global_state = trainable_state_dict(model)
+        start_round, best_r1, cum_uplink, t0 = 1, 0.0, 0.0, time.time()
+        with open(log_path, "w", newline="") as f:
+            csv.writer(f).writerow(
+                ["round", "loss", "R@1", "R@5", "R@10", "mAP", "mINP",
+                 "cum_uplink_MB", "elapsed_s"])
+
     n_per_round = max(1, int(round(args.client_fraction * len(client_ids))))
     if args.max_clients_per_round:
         n_per_round = min(n_per_round, args.max_clients_per_round)
 
     # ---------------- FedAvg loop ----------------
-    for rnd in range(1, args.rounds + 1):
+    for rnd in range(start_round, args.rounds + 1):
         selected = (client_ids if n_per_round >= len(client_ids)
                     else random.sample(client_ids, n_per_round))
 
@@ -142,6 +163,15 @@ def main(argv=None):
                 metrics["R@1"], metrics["R@5"], metrics["R@10"],
                 metrics["mAP"], metrics["mINP"],
                 f"{cum_uplink:.1f}", f"{time.time()-t0:.0f}"])
+
+        if rnd % args.ckpt_every == 0 or rnd == args.rounds:
+            torch.save({
+                "round": rnd,
+                "global_state": global_state,
+                "best_r1": best_r1,
+                "cum_uplink": cum_uplink,
+                "elapsed_s": time.time() - t0,
+            }, ckpt_path)
 
     print(f"\n[done] best R@1 = {best_r1:.2f} | total uplink {cum_uplink/1024:.2f} GB "
           f"({args.rounds} rounds x {len(client_ids)} clients)")

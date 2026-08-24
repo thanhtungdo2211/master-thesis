@@ -56,6 +56,14 @@ def get_args(argv=None):
 
     # ---------- Eval / logging ----------
     p.add_argument("--eval_every", type=int, default=5)
+    p.add_argument("--ckpt_every", type=int, default=1,
+                   help="Save a resumable checkpoint every this many rounds. Checkpoint size "
+                        "= uplink_mb_fp32 (tiny for LoRA, ~model size for full fine-tuning).")
+    p.add_argument("--fresh", action="store_true",
+                   help="Ignore any existing checkpoint.pt in --out_dir and start from round 1. "
+                        "Without this flag, if --out_dir already has a checkpoint, training "
+                        "AUTO-RESUMES from the last saved round (useful after a Colab disconnect: "
+                        "just rerun the exact same command).")
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--max_clients_per_round", type=int, default=0,
                    help="0 = no limit. Set >0 for fast debugging (random subsample each round).")

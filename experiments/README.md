@@ -20,8 +20,18 @@ Minimal baseline for the thesis *Parameter-Efficient Fine-Tuning for Foundation 
 ## Setup
 
 ```bash
-pip install "transformers>=4.40" torch torchvision pillow
+pip install "transformers==4.57.6" torch torchvision pillow
 ```
+
+`transformers` is pinned to the exact version this pipeline was developed
+against, not a floor (`>=`). `CLIPModel.get_image_features` / `get_text_features`
+have changed implementation across releases — in some versions they return the
+raw `BaseModelOutputWithPooling` from `vision_model(...)` instead of the
+projected embedding tensor, which surfaces as `AttributeError: '...' object
+has no attribute 'float'` deep inside `federated.train_one_client`. This bit
+us specifically on Colab: its preinstalled `transformers` already satisfied
+`>=4.40`, so `pip install "transformers>=4.40"` silently kept the old,
+incompatible version instead of installing the tested one. Always pin exactly.
 
 Dataset layout:
 ```
