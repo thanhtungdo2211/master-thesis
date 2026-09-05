@@ -121,9 +121,9 @@ Each run produces, under `--out_dir`:
 | IRRA (full, +IRR/MLM/ID) | 60.20 | 81.30 | 88.20 | 47.17 | 25.28 |
 | UP-Person (PETL, centralized) | 63.15 | – | – | – | – |
 
-**The "CLIP baseline" row (54.05) is the relevant reference point**, since its architecture matches this pipeline (CLIP dual-encoder, no IRR). The gap from 54.05 to 60.20 is exactly the contribution of IRR+MLM+ID, which we intentionally drop.
+**The "CLIP baseline" row (54.05) is architecturally the closest reference** (CLIP dual-encoder, no IRR), but it is a FULL fine-tune, not PEFT — so it is NOT automatically the ceiling for B5. On RSTPReid specifically, PEFT already beats full fine-tuning in the centralized setting: UP-Person (PEFT, 63.15) > IRRA (full FT, 60.20) > CLIP baseline (full FT, 54.05). RSTPReid is the smallest of the 3 benchmarks (18,505 train images), and full fine-tuning tends to overfit there while PEFT generalizes better — this is a real, literature-supported effect, not specific to our pipeline.
 
-Expectation: **B5 (FL non-IID + LoRA) should land below 54.05.** That gap is the actual result to measure, not a bug.
+Revised expectation: **B5 (FL non-IID + LoRA) landing between 54.05 and 63.15 is plausible and expected**, not a bug — it would mean the PEFT-over-full-FT advantage survives (at least partially) under non-IID FedAvg. If B5 lands *above* UP-Person's centralized 63.15, or keeps climbing well past it without plateauing, that would be the real red flag worth auditing (check for train/test leakage first — verified clean via `data_captions.json` id overlap = 0 as of this writing — then check the eval split/gallery size actually matches the published protocol: 200 test identities, 1000 gallery images, 2000 text queries).
 
 **Communication cost** (15 clients x 50 rounds, fp32, uplink-only):
 
