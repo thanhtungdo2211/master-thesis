@@ -20,7 +20,7 @@ Minimal baseline for the thesis *Parameter-Efficient Fine-Tuning for Foundation 
 ## Setup
 
 ```bash
-pip install "transformers==4.57.6" torch torchvision pillow
+pip install "transformers==4.57.6" torch torchvision pillow matplotlib
 ```
 
 `transformers` is pinned to the exact version this pipeline was developed
@@ -103,10 +103,17 @@ Each run produces, under `--out_dir`:
 | File | Content |
 |---|---|
 | `log.csv` | round, loss, R@1/5/10, mAP, mINP, cumulative uplink (MB), elapsed time |
+| `client_loss.csv` | round, client_id, n_samples, loss — per-client breakdown of the mean loss in `log.csv` |
 | `partition_stats.json` | images/IDs/captions per client, CV, mean pairwise pid Jaccard |
 | `partition.json` | the partition actually used, for reproducibility |
 | `args.json` | full config + trainable param count + MB/round/client |
 | `best.pt` | best LoRA checkpoint by R@1 |
+
+To visualize per-client loss convergence and cross-client heterogeneity from `client_loss.csv`:
+
+```bash
+python -m clip_lora_fedavg.plot_client_loss --run_dir runs/B5_camera_lora4
+```
 
 ---
 

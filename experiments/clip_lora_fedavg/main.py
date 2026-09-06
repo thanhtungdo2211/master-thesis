@@ -98,6 +98,7 @@ def main(argv=None):
 
     # ---------------- logging / resume state ----------------
     log_path = os.path.join(args.out_dir, "log.csv")
+    client_log_path = os.path.join(args.out_dir, "client_loss.csv")
     with open(os.path.join(args.out_dir, "args.json"), "w") as f:
         json.dump({**vars(args), **info}, f, indent=2)
 
@@ -117,6 +118,8 @@ def main(argv=None):
             csv.writer(f).writerow(
                 ["round", "loss", "R@1", "R@5", "R@10", "mAP", "mINP",
                  "cum_uplink_MB", "elapsed_s"])
+        with open(client_log_path, "w", newline="") as f:
+            csv.writer(f).writerow(["round", "client_id", "n_samples", "loss"])
 
     n_per_round = max(1, int(round(args.client_fraction * len(client_ids))))
     if args.max_clients_per_round:
@@ -134,6 +137,11 @@ def main(argv=None):
             states.append(st)
             weights.append(n)
             losses.append(ls)
+
+        with open(client_log_path, "a", newline="") as f:
+            w = csv.writer(f)
+            for cid, n, ls in zip(selected, weights, losses):
+                w.writerow([rnd, cid, n, f"{ls:.4f}"])
 
         global_state = fedavg(states, weights)
         cum_uplink += info["uplink_mb_fp32"] * len(selected)
