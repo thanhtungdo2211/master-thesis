@@ -23,6 +23,14 @@ Mean loss giảm đều, R@1 vượt CLIP baseline (54.05) từ round 10, đạt
 
 ## 2. Độ lệch (heterogeneity) giữa các client **tăng dần theo thời gian**, không giảm
 
+### 2.0 Đơn vị và range của loss
+
+Loss ở đây là **SDM loss** (Similarity Distribution Matching) — về bản chất là **KL divergence** giữa 2 phân phối: (1) phân phối similarity mà model dự đoán (softmax của cosine similarity giữa ảnh và caption trong batch) và (2) phân phối "đúng" dựa trên nhãn (ảnh/caption nào cùng 1 người thì phải giống nhau). Vì là KL divergence nên:
+
+- **Không có thang đo %** như accuracy — không thể nói "loss 15 nghĩa là đúng 85%".
+- **Không âm, không có giới hạn trên cố định** — càng gần 0 thì model dự đoán càng khớp hoàn hảo với nhãn thật; càng lớn thì càng lệch. Về lý thuyết có thể lớn tùy ý nếu model dự đoán sai hoàn toàn.
+- **Trong run này, giá trị quan sát được dao động khoảng 10.5 → 27.6** trên toàn bộ 21 round × 15 client (thấp nhất: client 14 ở round 21 = 10.49; cao nhất: client 9 ở round 1 = 27.57). Vì tất cả client dùng chung 1 công thức và cùng hệ số nhiệt độ (`temperature=0.02`), **so sánh loss giữa các client với nhau là hợp lệ** dù bản thân con số không có ý nghĩa tuyệt đối kiểu %.
+
 Tính mean/std/CV của loss **giữa 15 client** tại mỗi round (không phải theo thời gian của 1 client):
 
 | Round | Mean | Std | **CV** | Client thấp nhất | Client cao nhất |
@@ -38,6 +46,16 @@ Tính mean/std/CV của loss **giữa 15 client** tại mỗi round (không ph�
 Client **14** (camera lớn nhất, 6,530 sample) luôn là client có loss thấp nhất ở **20/21 round**. Client **13** và **10** (2 trong số các client thuộc "Nhóm B" ở tuần 11) luân phiên là client có loss cao nhất ở toàn bộ 21 round.
 
 ![per-client loss](../data/runs/B5_camera_lora4_v2_20260709/client_loss.png)
+
+**Panel bên phải — "Client loss heterogeneity per round" — đang thể hiện điều gì:**
+
+Đây là 1 boxplot cho **mỗi round** (không phải cho từng client). Tại mỗi round, lấy 15 giá trị loss của 15 client, vẽ thành 1 hộp:
+
+- Đường giữa hộp (màu cam) = **median** (giá trị loss ở giữa) của 15 client tại round đó.
+- Thân hộp = khoảng **25%–75%** (phần lớn client nằm trong khoảng này).
+- 2 râu (whisker) trên/dưới = **min–max**, tức client thấp nhất và cao nhất tại round đó.
+
+→ Nó không nói "1 client cụ thể học nhanh hay chậm" (đó là việc của panel trái), mà nói **"tại mỗi thời điểm, 15 client đang tản mát ra sao so với nhau."** Đọc chuỗi 21 hộp từ trái sang phải: cả hộp dịch chuyển xuống dưới đều đặn (đúng — training vẫn đang tiến triển, ai cũng giảm loss), nhưng **chiều cao của hộp và độ dài của râu không co lại mà có xu hướng rộng ra** — nghĩa là độ tản mát (chênh lệch giữa client dễ nhất và khó nhất) **không thu hẹp theo thời gian, mà ngày càng lớn**. Đây là cách trực quan để thấy đúng điều số liệu CV ở trên đang chỉ ra, mà không cần đọc bảng số.
 
 ---
 

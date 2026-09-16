@@ -13,9 +13,13 @@ def get_args(argv=None):
 
     # ---------- Federated partitioning ----------
     p.add_argument("--partition", type=str, default="camera",
-                   choices=["camera", "dirichlet", "iid"])
+                   choices=["camera", "dirichlet", "iid", "centralized"],
+                   help="'centralized' = 1 client holding the whole train set, i.e. the "
+                        "non-FL LoRA baseline (FedAvg over a single client is a no-op, so "
+                        "rounds x local_epochs is just the total number of epochs).")
     p.add_argument("--num_clients", type=int, default=15,
-                   help="Only used for dirichlet/iid. For camera, #clients = #cameras present.")
+                   help="Only used for dirichlet/iid. For camera, #clients = #cameras present. "
+                        "Ignored for centralized (always 1).")
     p.add_argument("--dirichlet_alpha", type=float, default=0.5)
     p.add_argument("--partition_file", type=str, default=None,
                    help="If set, load the partition from this JSON instead of generating one. "

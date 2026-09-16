@@ -52,13 +52,15 @@ print(f"2. load_annotations: train {len(train_items)} images, test {len(splits['
 assert len(train_items) == (N_ID - 40) * 5
 
 # ---------------- 3. partitioning strategies ----------------
-for strat, kw in [("camera", {}), ("iid", {}), ("dirichlet", {})]:
+for strat, kw in [("camera", {}), ("iid", {}), ("dirichlet", {}), ("centralized", {})]:
     part = build_partition(train_items, strat, 15, 0.5, 42)
     rows, summ = partition_stats(part, train_items)
     covered = sum(len(v) for v in part.values())
     assert covered == len(train_items), f"{strat}: data loss ({covered} vs {len(train_items)})"
     assert len(set().union(*[set(v) for v in part.values()])) == len(train_items), \
         f"{strat}: duplicate index across clients"
+    if strat == "centralized":
+        assert summ["n_clients"] == 1, "centralized must yield exactly 1 client"
     print(f"3. {strat:10s} -> {summ['n_clients']:2d} clients | "
           f"images {summ['images_min']}-{summ['images_max']} | "
           f"CV {summ['cv_images']:.3f} | pid Jaccard {summ['mean_pairwise_jaccard_pid']:.3f}")

@@ -60,7 +60,54 @@ python -m clip_lora_fedavg.main --root /path/to/RSTPReid \
   --out_dir runs/B4_camera_full \
   --partition camera --tuning full \
   --rounds 50 --batch_size 32 --lr 1e-5
+
+# C1: centralized (non-FL) LoRA r=4 — the reference for the FL gap
+python -m clip_lora_fedavg.main --root /path/to/RSTPReid \
+  --out_dir runs/C1_centralized_lora4 \
+  --partition centralized --tuning lora --lora_rank 4 \
+  --rounds 50 --local_epochs 1 --batch_size 64 --lr 1e-4
 ```
+
+### Centralized (non-FL) baseline
+
+`--partition centralized` puts the whole train set in one client, so FedAvg
+becomes the identity and `--rounds x --local_epochs` is just the total number of
+epochs. This is the run that separates the two gaps the thesis reports:
+centralized LoRA vs **B5** = the FL gap; centralized LoRA vs full fine-tuning
+(IRRA 60.20 / CLIP 54.05) = the PEFT gap.
+
+One FL round costs `sum_k(n_k)/batch ~= 580` steps summed over the 15 clients,
+i.e. exactly one centralized epoch — so 50 centralized rounds vs 50 FL rounds is
+**compute-matched**, not just epoch-matched.
+
+Caveat worth stating in the report: `train_one_client` builds a fresh AdamW every
+round, so the centralized run resets its optimizer state once per epoch. That is
+the same treatment the FL clients get (which keeps B5 vs C1 fair), but it is not
+a textbook 50-epoch centralized run. For that variant use
+`--rounds 10 --local_epochs 5`.
+
+### LoRA rank sweep
+
+Keep every other flag fixed and set `alpha = 2 * rank`: the LoRA scaling is
+`alpha / r`, so a fixed alpha would vary the effective update size with rank and
+confound capacity with step size. With `alpha = 2r` the scaling stays 2.0 and
+`r=4, alpha=8` reproduces B5 exactly, so B5 can serve as the r=4 data point.
+
+```bash
+for R in 2 8 16; do
+  python -m clip_lora_fedavg.main --root /path/to/RSTPReid \
+    --out_dir runs/rank_sweep/r$R \
+    --partition camera --seed 42 \
+    --tuning lora --lora_rank $R --lora_alpha $((2*R)) \
+    --rounds 25 --local_epochs 1 --eval_every 5 \
+    --batch_size 64 --lr 1e-4
+done
+```
+
+Compare only runs with the same round budget, and read accuracy against
+`uplink_mb_fp32` in `args.json` (the communication axis), not just against rank.
+`experiments/notebooks/clip_lora_fedavg_colab.ipynb` sections 9-10 run both of
+these and plot the comparisons.
 
 Smoke test before a real run:
 ```bash
@@ -184,7 +231,7 @@ Just needs wrapping — no need to rewrite the training logic.
 ```
 clip_lora_fedavg/
   config.py       argparse, all hyperparameters
-  data.py         RSTPReid loading, camera-id parsing, 3 partition strategies, Dataset classes
+  data.py         RSTPReid loading, camera-id parsing, 4 partition strategies, Dataset classes
   lora.py         generic LoRA layer, injection, trainable-state helpers
   clip_model.py   CLIP wiring: position-embedding interpolation, build_model, encode_image/text
   loss.py         SDM loss

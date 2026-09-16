@@ -42,7 +42,9 @@
 
 **Output:** `runs/rank_sweep/r{2,4,8,16,32}/` (mỗi thư mục là 1 run đầy đủ) + bảng so sánh + 2 biểu đồ tổng hợp.
 
-**Lưu ý:** Chưa có script sweep nào trong repo hiện tại — cần viết mới. Không có `peft` dependency nên không có tiện ích tự động set rank; chỉ cần truyền `--lora_rank` qua CLI (`config.py:36`).
+**Lưu ý:** Không có `peft` dependency nên không có tiện ích tự động set rank; chỉ cần truyền `--lora_rank` qua CLI (`config.py`). Quan trọng: phải set `--lora_alpha 2*rank` chứ không giữ alpha=8 cố định, vì LoRA scaling = `alpha/r` — giữ alpha cố định sẽ làm biên độ update thay đổi theo rank và trộn lẫn ảnh hưởng của capacity với step size. Với `alpha = 2r` thì scaling luôn = 2.0, và `r=4, alpha=8` trùng khớp chính xác với run B5 nên B5 dùng luôn làm điểm r=4.
+
+**Trạng thái (2026-09-11):** không viết script sweep riêng — sweep chạy bằng vòng lặp trong notebook (cell `## 10`), cộng 2 cell tổng hợp: `10b` (accuracy-vs-rank, accuracy-vs-uplink, convergence per rank, có `MATCH_ROUNDS` để chỉ so các run cùng số round) và `10c` (mean/std loss giữa các client theo rank, từ `client_loss.csv`).
 
 ---
 
@@ -62,3 +64,9 @@
 **Output:** 1 run dir centralized-LoRA (ví dụ `runs/centralized_lora4/`), dùng để so sánh trực tiếp với các run FL hiện có (B3/B4/B5) trong bảng tổng kết kết quả.
 
 **Lưu ý:** Không cần chạy centralized full fine-tune riêng cho pipeline này vì đã có `data/irra_rtsp` (checkpoint + log) làm baseline full fine-tune tham chiếu.
+
+**Trạng thái (2026-09-11):** đã implement `--partition centralized` (`data.py:build_partition`, `config.py`), có test trong `tests/test_logic.py`, và notebook cell `## 9` (run C1) + `9b` (biểu đồ + bảng FL gap).
+
+**Hai điểm cần nói rõ trong report:**
+- **Compute-matched, không chỉ epoch-matched:** 1 round FL tốn `sum_k(n_k)/batch ≈ 580` step tính tổng trên 15 client, đúng bằng 1 epoch centralized. Nên 50 round centralized vs 50 round FL dùng cùng số optimizer step → so sánh với B5 là công bằng về compute.
+- **Optimizer state reset:** `train_one_client()` tạo AdamW mới mỗi round, nên run centralized reset optimizer state 1 lần/epoch. Đây đúng là cách các client FL cũng bị đối xử (nên B5 vs C1 vẫn công bằng), nhưng KHÁC với một run centralized 50-epoch chuẩn có Adam state liên tục. Nếu cần biến thể đó thì chạy `--rounds 10 --local_epochs 5`.

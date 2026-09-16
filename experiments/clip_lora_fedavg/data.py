@@ -61,9 +61,20 @@ def parse_camera_id(img_path):
 
 # ---------------------------------------------------------------- partitions
 def build_partition(train_items, strategy, num_clients, alpha, seed):
-    """Return dict {client_id(str): [index into train_items]}."""
+    """Return dict {client_id(str): [index into train_items]}.
+
+    Strategies: "camera" (one client per camera, feature skew), "iid" (random
+    equal split), "dirichlet" (pid/label skew), "centralized" (one client with
+    everything = non-FL reference run).
+    """
     rng = np.random.RandomState(seed)
     n = len(train_items)
+
+    if strategy == "centralized":
+        # Non-FL baseline: a single "client" holding the whole training set.
+        # FedAvg over one state dict is the identity, so each round is just one
+        # more pass over all the data -> rounds x local_epochs = total epochs.
+        return {"0": list(range(n))}
 
     if strategy == "camera":
         buckets = defaultdict(list)
