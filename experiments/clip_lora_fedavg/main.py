@@ -13,7 +13,7 @@ from .config import get_args
 from .data import (build_partition, build_transforms, load_annotations,
                    partition_stats, TrainPairDataset)
 from .evaluate import evaluate
-from .federated import fedavg, train_one_client
+from .federated import build_optimizer, fedavg, round_lr, train_one_client
 from .lora import load_trainable_state_dict, trainable_state_dict
 
 
@@ -96,10 +96,66 @@ def main(argv=None):
 
     scaler = torch.amp.GradScaler("cuda") if (args.amp and device == "cuda") else None
 
+    n_per_round = max(1, int(round(args.client_fraction * len(client_ids))))
+    if args.max_clients_per_round:
+        n_per_round = min(n_per_round, args.max_clients_per_round)
+
+    # ---------------- setting: centralized baseline vs federated ----------------
+    # These are two DIFFERENT experiments sharing one code path. The banner below is the
+    # single place that spells out how they differ, so a log file is self-documenting.
+    is_centralized = len(client_ids) == 1
+    if args.persistent_optimizer and not is_centralized:
+        raise ValueError(
+            f"--persistent_optimizer requires exactly 1 client, got {len(client_ids)} "
+            f"(partition={args.partition}). Sharing AdamW moments across FedAvg clients is "
+            f"not FedAvg: clients are stateless and the global weights move under them. "
+            f"Drop the flag to run federated."
+        )
+
+    if is_centralized:
+        opt_mode = ("PERSISTENT across rounds -> TRUE centralized training"
+                    if args.persistent_optimizer else
+                    "rebuilt every round (FL code path) -> comparable to FL, NOT a true "
+                    "centralized upper bound")
+        print(f"[setting] CENTRALIZED BASELINE (non-FL) | 1 client holds all "
+              f"{sum(len(v) for v in partition.values())} images | FedAvg is the identity, "
+              f"so 1 round = {args.local_epochs} epoch(s)")
+    else:
+        opt_mode = "rebuilt per client per round (stateless clients -> correct FedAvg)"
+        print(f"[setting] FEDERATED (FedAvg) | {len(client_ids)} clients | "
+              f"{n_per_round}/round | "
+              f"{args.local_epochs} local epoch(s) each")
+    print(f"[setting] optimizer: AdamW {opt_mode}")
+    if args.lr_schedule == "constant":
+        print(f"[setting] lr: CONSTANT {args.lr:.2e} for all {args.rounds} rounds "
+              f"(no warmup, no decay -- legacy behaviour)")
+    else:
+        print(f"[setting] lr: cosine over {args.rounds} rounds | peak {args.lr:.2e} "
+              f"after {args.warmup_rounds} warmup round(s) | final "
+              f"{args.lr * args.lr_min_ratio:.2e}")
+
+    persistent_optimizer = build_optimizer(model, args) if args.persistent_optimizer else None
+
     # ---------------- logging / resume state ----------------
     log_path = os.path.join(args.out_dir, "log.csv")
     client_log_path = os.path.join(args.out_dir, "client_loss.csv")
-    with open(os.path.join(args.out_dir, "args.json"), "w") as f:
+    args_path = os.path.join(args.out_dir, "args.json")
+
+    if resume and os.path.exists(args_path):
+        with open(args_path) as f:
+            prev = json.load(f)
+        watched = ("lr", "lr_schedule", "warmup_rounds", "lr_min_ratio", "rounds",
+                   "persistent_optimizer", "batch_size", "lora_rank", "lora_alpha")
+        changed = {k: (prev.get(k, "<absent>"), getattr(args, k))
+                   for k in watched if prev.get(k, "<absent>") != getattr(args, k)}
+        if changed:
+            print("[resume][WARNING] settings differ from the run being resumed "
+                  "(was -> now): " + ", ".join(f"{k} {a} -> {b}"
+                                               for k, (a, b) in changed.items()))
+            print("[resume][WARNING] this run's lr trajectory is no longer the one it "
+                  "started with; for a clean experiment use --fresh and a new --out_dir.")
+
+    with open(args_path, "w") as f:
         json.dump({**vars(args), **info}, f, indent=2)
 
     if resume:
@@ -111,29 +167,34 @@ def main(argv=None):
         t0 = time.time() - ckpt["elapsed_s"]
         print(f"[resume] continuing from round {start_round}/{args.rounds} "
               f"(best R@1 so far {best_r1:.2f}, uplink so far {cum_uplink/1024:.2f} GB)")
+        if persistent_optimizer is not None:
+            if "optimizer_state" in ckpt:
+                persistent_optimizer.load_state_dict(ckpt["optimizer_state"])
+                print("[resume] restored persistent AdamW moments")
+            else:
+                print("[resume][WARNING] checkpoint has no optimizer state (started without "
+                      "--persistent_optimizer?); Adam moments restart from zero here")
     else:
         global_state = trainable_state_dict(model)
         start_round, best_r1, cum_uplink, t0 = 1, 0.0, 0.0, time.time()
         with open(log_path, "w", newline="") as f:
             csv.writer(f).writerow(
                 ["round", "loss", "R@1", "R@5", "R@10", "mAP", "mINP",
-                 "cum_uplink_MB", "elapsed_s"])
+                 "cum_uplink_MB", "elapsed_s", "lr"])
         with open(client_log_path, "w", newline="") as f:
             csv.writer(f).writerow(["round", "client_id", "n_samples", "loss"])
 
-    n_per_round = max(1, int(round(args.client_fraction * len(client_ids))))
-    if args.max_clients_per_round:
-        n_per_round = min(n_per_round, args.max_clients_per_round)
-
     # ---------------- FedAvg loop ----------------
     for rnd in range(start_round, args.rounds + 1):
+        lr_now = round_lr(args, rnd)
         selected = (client_ids if n_per_round >= len(client_ids)
                     else random.sample(client_ids, n_per_round))
 
         states, weights, losses = [], [], []
         for cid in selected:
             st, n, ls = train_one_client(model, global_state, client_sets[cid],
-                                         args, device, scaler)
+                                         args, device, scaler,
+                                         lr=lr_now, optimizer=persistent_optimizer)
             states.append(st)
             weights.append(n)
             losses.append(ls)
@@ -147,7 +208,7 @@ def main(argv=None):
         cum_uplink += info["uplink_mb_fp32"] * len(selected)
         mean_loss = float(np.mean(losses))
 
-        line = f"[round {rnd:03d}/{args.rounds}] loss {mean_loss:.4f} | " \
+        line = f"[round {rnd:03d}/{args.rounds}] lr {lr_now:.2e} | loss {mean_loss:.4f} | " \
                f"cumulative uplink {cum_uplink/1024:.2f} GB | {time.time()-t0:.0f}s"
 
         metrics = {k: "" for k in ("R@1", "R@5", "R@10", "mAP", "mINP")}
@@ -170,16 +231,19 @@ def main(argv=None):
                 rnd, f"{mean_loss:.4f}",
                 metrics["R@1"], metrics["R@5"], metrics["R@10"],
                 metrics["mAP"], metrics["mINP"],
-                f"{cum_uplink:.1f}", f"{time.time()-t0:.0f}"])
+                f"{cum_uplink:.1f}", f"{time.time()-t0:.0f}", f"{lr_now:.6e}"])
 
         if rnd % args.ckpt_every == 0 or rnd == args.rounds:
-            torch.save({
+            payload = {
                 "round": rnd,
                 "global_state": global_state,
                 "best_r1": best_r1,
                 "cum_uplink": cum_uplink,
                 "elapsed_s": time.time() - t0,
-            }, ckpt_path)
+            }
+            if persistent_optimizer is not None:
+                payload["optimizer_state"] = persistent_optimizer.state_dict()
+            torch.save(payload, ckpt_path)
 
     print(f"\n[done] best R@1 = {best_r1:.2f} | total uplink {cum_uplink/1024:.2f} GB "
           f"({args.rounds} rounds x {len(client_ids)} clients)")

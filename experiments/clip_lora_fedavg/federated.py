@@ -12,6 +12,7 @@ This is a known aggregation bias (see FedIT). This baseline accepts it to
 establish a reference point, and records it as a limitation.
 """
 import copy
+import math
 
 import torch
 from torch.utils.data import DataLoader
@@ -31,13 +32,56 @@ def fedavg(states, weights):
     return {k: v.to(states[0][k].dtype) for k, v in out.items()}
 
 
-def train_one_client(model, global_state, dataset, args, device, scaler=None):
-    """Returns (trainable state dict, n_samples, avg_loss)."""
+def round_lr(args, rnd):
+    """LR for global round `rnd` (1-indexed), computed SERVER-SIDE.
+
+    Every client selected in a round trains at the same lr, which is what keeps the
+    centralized baseline and the FL runs on an identical lr trajectory -- the only
+    difference between them stays the partitioning.
+    """
+    if args.lr_schedule == "constant":
+        return args.lr
+    w = max(args.warmup_rounds, 0)
+    if w and rnd <= w:
+        return args.lr * rnd / w
+    progress = (rnd - w) / max(args.rounds - w, 1)
+    progress = min(max(progress, 0.0), 1.0)
+    cos = 0.5 * (1.0 + math.cos(math.pi * progress))
+    return args.lr * (args.lr_min_ratio + (1.0 - args.lr_min_ratio) * cos)
+
+
+def build_optimizer(model, args):
+    params = [p for p in model.parameters() if p.requires_grad]
+    return torch.optim.AdamW(params, lr=args.lr, weight_decay=args.weight_decay)
+
+
+def train_one_client(model, global_state, dataset, args, device, scaler=None,
+                     lr=None, optimizer=None):
+    """Returns (trainable state dict, n_samples, avg_loss).
+
+    Two optimizer regimes, and which one you get is the difference between the two settings:
+
+    optimizer=None  -- FL path (and the FL-symmetric centralized baseline). A fresh AdamW
+        is built here and discarded at the end. This is correct FedAvg: clients are
+        stateless, a client may be skipped for several rounds, and the global weights moved
+        underneath it, so last round's moments point the wrong way.
+    optimizer=<AdamW> -- true centralized path (--persistent_optimizer, 1 client only).
+        The caller owns one optimizer that lives across all rounds, so Adam's moments
+        accumulate over every step exactly as in ordinary non-federated training.
+
+    Note the persistent case is only sound because `load_trainable_state_dict` copies
+    IN-PLACE into the same Parameter objects the optimizer holds references to.
+    """
     load_trainable_state_dict(model, global_state)
     model.train()
 
     params = [p for p in model.parameters() if p.requires_grad]
-    optimizer = torch.optim.AdamW(params, lr=args.lr, weight_decay=args.weight_decay)
+    owns_optimizer = optimizer is None
+    if owns_optimizer:
+        optimizer = build_optimizer(model, args)
+    if lr is not None:
+        for group in optimizer.param_groups:
+            group["lr"] = lr
 
     loader = DataLoader(
         dataset, batch_size=args.batch_size, shuffle=True,
@@ -77,7 +121,8 @@ def train_one_client(model, global_state, dataset, args, device, scaler=None):
             total_loss += loss.item()
             n_step += 1
 
-    del optimizer
+    if owns_optimizer:
+        del optimizer
     state = trainable_state_dict(model)
     avg_loss = total_loss / max(n_step, 1)
     return state, len(dataset), avg_loss
@@ -87,4 +132,5 @@ def clone_state(state):
     return {k: v.clone() for k, v in state.items()}
 
 
-__all__ = ["fedavg", "train_one_client", "clone_state", "copy"]
+__all__ = ["fedavg", "train_one_client", "clone_state", "round_lr",
+           "build_optimizer", "copy"]

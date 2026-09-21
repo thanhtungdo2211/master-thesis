@@ -128,11 +128,39 @@ Tại sao UP-Person chỉ đặt LoRA trên K,V mà không có Q,O? Theo phân t
 | PEFT | `--tuning` | `lora` | `lora` hoặc `full` |
 | | `--lora_rank` / `--lora_alpha` | 4 / 8 | r, alpha |
 | | `--lora_targets` | `q_proj,k_proj,v_proj,out_proj` | Có thể giảm xuống `k_proj,v_proj` như UP-Person |
-| Train | `--batch_size`, `--lr`, `--weight_decay`, `--temperature` | 64, 1e-4, 0.02, 0.02 | lr gợi ý 1e-4 (LoRA) / 1e-5 (full) |
+| Train | `--batch_size`, `--lr`, `--weight_decay`, `--temperature` | 64, 1e-4, 0.02, 0.02 | `--lr` là lr **đỉnh** (đạt được ở cuối warmup); 1e-4 (LoRA) / 1e-5 (full) |
+| | `--lr_schedule`, `--warmup_rounds`, `--lr_min_ratio` | `cosine`, 3, 0.01 | Lịch lr tính **server-side theo round**: mọi client trong cùng round dùng chung 1 lr → C1/B3/B5 nằm trên cùng quỹ đạo lr. `constant` = hành vi cũ (không warmup, không decay) |
+| | `--persistent_optimizer` | off | **Chỉ cho baseline centralized (1 client)**, raise lỗi nếu >1 client. Giữ 1 `AdamW` sống suốt run = training centralized thật. Không bật → optimizer bị tạo lại mỗi round (đường code FL) |
 | | `--amp` | True | fp16 autocast, loss tính lại ở fp32 để tránh NaN |
 | Ảnh/text | `--img_h/--img_w/--text_len` | 384/128/77 | |
 | Eval/log | `--eval_every`, `--ckpt_every` | 5, 1 | |
 | Resume | `--fresh` | off | Không có flag này → tự resume từ `checkpoint.pt` nếu có (dùng lại đúng partition cũ) |
+
+
+### Hai setting centralized — phân biệt rõ
+
+`train_one_client` tạo `AdamW` mới cho **mỗi client, mỗi round**. Trong FedAvg đây là
+hành vi **đúng**: client là stateless, có thể không được chọn ở round sau, và trọng số
+global đã dịch chuyển dưới chân nó nên moment cũ trỏ sai hướng. Nhưng baseline
+centralized đi qua đúng hàm đó nên **thừa hưởng ràng buộc mà nó không cần chịu**.
+
+Vì vậy có hai biến thể centralized, trả lời hai câu hỏi khác nhau:
+
+| | **C1 — centralized FL-symmetric** | **C1-true — centralized thật** |
+|---|---|---|
+| Flag | *(không có)* | `--persistent_optimizer` |
+| Optimizer | tạo lại mỗi round | một `AdamW` duy nhất suốt run |
+| Moment Adam | reset mỗi epoch | tích luỹ qua mọi step |
+| Khác B3/B5 ở | **chỉ partitioning** | partitioning **và** cách xử lý optimizer |
+| Dùng làm | đo **FL gap** sạch | **upper bound** centralized để so với literature |
+
+`C1-true - C1` chính là **chi phí của việc reset optimizer**, tính bằng R@1 — cũng là
+lượng mà FL gap đo trên C1 đang bị báo *thấp hơn* thực tế. Báo cáo cả hai số.
+
+Kiểm tra đã thực hiện (CPU smoke test, `--debug_steps 2`): C1-true và C1 tách nhau từ
+round 2 (loss 14.0450 vs 14.0455) → persistent optimizer thật sự đổi quỹ đạo; cờ này bị
+từ chối với 3 client; checkpoint của C1-true có thêm khoá `optimizer_state` nên resume
+sau khi Colab ngắt không mất moment.
 
 Toàn bộ config + số param trainable + MB/round được ghi vào `args.json` mỗi run.
 

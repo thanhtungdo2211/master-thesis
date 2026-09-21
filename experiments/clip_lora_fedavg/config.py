@@ -46,8 +46,28 @@ def get_args(argv=None):
     # ---------- Training ----------
     p.add_argument("--batch_size", type=int, default=64)
     p.add_argument("--lr", type=float, default=1e-4,
-                   help="1e-4 for LoRA, 1e-5 for full fine-tuning")
+                   help="Peak lr (reached at the end of warmup). 1e-4 for LoRA, 1e-5 for full FT.")
+    p.add_argument("--lr_schedule", type=str, default="cosine",
+                   choices=["constant", "cosine"],
+                   help="GLOBAL schedule over ROUNDS. The server computes the round's lr and "
+                        "every selected client trains with it, so FL and the centralized "
+                        "baseline see the same lr trajectory. 'constant' reproduces runs made "
+                        "before this flag existed (no warmup, no decay).")
+    p.add_argument("--warmup_rounds", type=int, default=3,
+                   help="Linear warmup: round r <= N uses lr * r/N. Ignored when "
+                        "--lr_schedule constant.")
+    p.add_argument("--lr_min_ratio", type=float, default=0.01,
+                   help="Cosine decays to lr * this ratio at the final round.")
     p.add_argument("--weight_decay", type=float, default=0.02)
+    p.add_argument("--persistent_optimizer", action="store_true",
+                   help="CENTRALIZED BASELINE ONLY -- requires exactly 1 client. Keeps ONE "
+                        "AdamW alive across all rounds, i.e. real non-FL training where Adam's "
+                        "moments accumulate over every step. Rejected with >1 client: FedAvg "
+                        "clients are stateless (a client may sit out rounds, and the global "
+                        "weights move under it), so sharing moments across clients is not "
+                        "FedAvg. Without this flag a centralized run still goes through the FL "
+                        "code path and rebuilds AdamW each round -- valid, and the right choice "
+                        "when you want C1 vs FL to differ ONLY in partitioning.")
     p.add_argument("--temperature", type=float, default=0.02, help="SDM temperature")
     p.add_argument("--num_workers", type=int, default=2)
     p.add_argument("--amp", action="store_true", default=True)
