@@ -1,0 +1,32 @@
+\section{Introduction}\label{sec:intro}
+
+\subsection{Problem}
+In text-based person search (TBPS), the input is a text description of a person, for example ``a woman with a grey jacket and a red backpack''. The system ranks a gallery of person images by their match to the text \citep{li2017personsearchnaturallanguage}. The images come from surveillance cameras. Different owners operate the cameras, and they cannot move person images to a central server.
+
+Federated learning (FL) \citep{mcmahan2023communicationefficientlearningdeepnetworks} solves this problem. Each client trains on its local data and sends only a model update to the server. The server averages the updates.
+
+The best TBPS models use CLIP \citep{radford2021learningtransferablevisualmodels}. Full fine-tuning of CLIP changes approximately 195M parameters (IRRA \citep{jiang2023crossmodalimplicitrelationreasoning}). In FL, each client sends its trainable parameters in each round. Thus, the number of trainable parameters is the communication cost. PEFT reduces this number.
+
+\subsection{Gap}
+All PEFT methods for TBPS that we read (CSKT \citep{liu2024clipbasedsynergisticknowledgetransfer}, DM-Adapter \citep{liu2025dmadapterdomainawaremixtureofadapterstextbased}, UP-Person \citep{liu2025uppersonunifiedparameterefficienttransfer}) use centralized training. FL adds three problems:
+\begin{description}[leftmargin=2.4em,style=nextline]
+  \item[O1 -- Loss.] A loss with an identity classifier cannot be averaged. Each client has a different set of identities.
+  \item[O2 -- Aggregation.] FedAvg averages the LoRA factors $A$ and $B$ separately. The average of the products $BA$ is not equal to the product of the averages.
+  \item[O3 -- Non-IID data.] Each camera sees different people and different scenes.
+\end{description}
+We did not find a work that combines FL, PEFT, CLIP and TBPS. This is not a systematic survey yet (\cref{sec:limits}).
+
+\subsection{Research questions}
+\begin{description}[leftmargin=2.4em,style=nextline]
+  \item[RQ1] Which PEFT method and which loss from centralized TBPS work in FL?
+  \item[RQ2] How much accuracy do we lose because of FL (FL gap), non-IID data (non-IID gap) and PEFT (PEFT gap)?
+  \item[RQ3] Where does LoRA with FedAvg fail on non-IID data, and how can we correct it?
+\end{description}
+
+\subsection{Work done in this period}
+\begin{enumerate}[label=(W\arabic*)]
+  \item A literature study of IRRA, DM-Adapter and UP-Person (\cref{sec:lit}).
+  \item The pipeline \texttt{experiments/clip\_lora\_fedavg/} (\cref{sec:pipeline}).
+  \item One centralized LoRA run (C1-true) and two FL LoRA runs (B5) on RSTPReid (\cref{sec:setup}, \cref{sec:results}).
+  \item An analysis of the camera partition and of the loss of each client (\cref{sec:partition}, \cref{sec:hetero}).
+\end{enumerate}

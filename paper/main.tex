@@ -1,0 +1,83 @@
+% Progress report: PEFT for foundation models in federated learning -- text-based person search.
+% Build:  cd paper && python3 scripts/gen_tables.py && latexmk -pdf -outdir=build main.tex
+% Overleaf: compiler = pdfLaTeX (default). Do not run a single pdflatex pass: it gives "??".
+% Writing style: ASD-STE100 (Simplified Technical English).
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{mathptmx}
+\usepackage[scaled=0.92]{helvet}
+\usepackage{courier}
+\usepackage{amsmath,amssymb}
+\usepackage[a4paper,margin=2.5cm]{geometry}
+\usepackage{microtype}
+\usepackage{booktabs,array,tabularx}
+\usepackage{xcolor}
+\usepackage{graphicx}
+\usepackage{enumitem}
+\setlist{itemsep=1pt,topsep=3pt}
+\usepackage{caption}
+\captionsetup{font=small,labelfont=bf}
+\usepackage[ruled,vlined,linesnumbered]{algorithm2e}
+\usepackage{tikz}
+\usetikzlibrary{positioning,arrows.meta,calc}
+\usepackage{pgfplots}
+\usepgfplotslibrary{groupplots}
+\pgfplotsset{compat=1.17}
+\usepackage{float}
+\usepackage[export]{adjustbox}
+\usepackage{tcolorbox}
+\usepackage[numbers,sort&compress]{natbib}
+\usepackage[colorlinks=true,linkcolor=blue!50!black,citecolor=green!40!black,urlcolor=blue!50!black]{hyperref}
+\usepackage[nameinlink,capitalise]{cleveref}
+
+% allow line breaks after "_" inside \texttt
+\renewcommand{\_}{\textunderscore\allowbreak{}}
+\newcommand{\fit}[1]{\adjustbox{max width=\textwidth}{#1}}
+\newcommand{\pp}{\,pp}
+\newcommand{\todo}[1]{\textcolor{red!70!black}{\textbf{[TODO: #1]}}}
+\newcommand{\result}[1]{\begin{tcolorbox}[colback=blue!4,colframe=blue!45!black,boxrule=0.5pt,arc=1.5pt,left=4pt,right=4pt,top=3pt,bottom=3pt]\textbf{Result.} #1\end{tcolorbox}}
+\newcommand{\caution}[1]{\begin{tcolorbox}[colback=orange!7,colframe=orange!60!black,boxrule=0.5pt,arc=1.5pt,left=4pt,right=4pt,top=3pt,bottom=3pt]\textbf{Caution.} #1\end{tcolorbox}}
+
+% experimental numbers: generated from results/*.csv by scripts/gen_tables.py
+\input{generated/macros.tex}
+
+\title{\bfseries Parameter-Efficient Fine-Tuning of Foundation Models\\in Federated Learning for Text-Based Person Search\\[4pt]
+\large Progress Report}
+\author{\todo{student name} \qquad Supervisor: \todo{supervisor name}}
+\date{\today}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+\noindent
+This report gives the status of the thesis work. The task is text-based person search (TBPS): find a person in camera images from a text description. Camera owners cannot share their images, so we use federated learning (FL). The model is CLIP ViT-B/16, which is too large to send in each FL round, so we use parameter-efficient fine-tuning (PEFT).
+We did three tasks.
+(1)~We read the TBPS literature. It shows that PEFT is equal to or better than full fine-tuning, and that the SDM loss alone is sufficient.
+(2)~We built the pipeline \texttt{clip\_lora\_fedavg}: CLIP + LoRA ($r{=}4$) + SDM loss + FedAvg, on RSTPReid split into 15 camera clients.
+(3)~We trained one centralized LoRA model and two FL LoRA models.
+LoRA trains \numTrainPct\% of the parameters and sends \numUplinkLoRA\,MiB per client per round (full fine-tuning: \numUplinkFull\,MiB).
+The centralized LoRA model converges at R@1 \numCPlatR{} and mAP \numCPlatM. This is \numGapIrraConvR\pp{} R@1 below IRRA (full fine-tuning, three losses) on the same converged measure.
+The FL model gets near the centralized result when the number of rounds increases.
+The training loss of the clients separates into two groups, and the gap between the groups increases (\numGapFirst{} to \numGapLast).
+The report also gives the items that we did not measure yet.
+\end{abstract}
+
+\tableofcontents
+
+\input{sections/01_intro}
+\input{sections/02_literature}
+\input{sections/03_pipeline}
+\input{sections/04_setup}
+\input{sections/05_results}
+\input{sections/06_limits}
+\input{sections/07_next}
+
+\bibliographystyle{unsrtnat}
+\bibliography{refs}
+
+\appendix
+\input{sections/A_appendix}
+\end{document}

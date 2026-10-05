@@ -1,0 +1,177 @@
+{
+  "num_clients": 15,
+  "total_train_images": 18505,
+  "total_train_identities": 3701,
+  "identity_overlap_ratio": 0.9984,
+  "load_imbalance_cv": 0.851,
+  "per_client": [
+    {
+      "client": "cam_01",
+      "num_images": 3071,
+      "num_identities": 2421,
+      "num_captions": 6142,
+      "cameras": {
+        "1": 3071
+      },
+      "images_per_identity": 1.27
+    },
+    {
+      "client": "cam_02",
+      "num_images": 56,
+      "num_identities": 53,
+      "num_captions": 112,
+      "cameras": {
+        "2": 56
+      },
+      "images_per_identity": 1.06
+    },
+    {
+      "client": "cam_03",
+      "num_images": 313,
+      "num_identities": 307,
+      "num_captions": 626,
+      "cameras": {
+        "3": 313
+      },
+      "images_per_identity": 1.02
+    },
+    {
+      "client": "cam_04",
+      "num_images": 514,
+      "num_identities": 503,
+      "num_captions": 1028,
+      "cameras": {
+        "4": 514
+      },
+      "images_per_identity": 1.02
+    },
+    {
+      "client": "cam_05",
+      "num_images": 2504,
+      "num_identities": 2208,
+      "num_captions": 5008,
+      "cameras": {
+        "5": 2504
+      },
+      "images_per_identity": 1.13
+    },
+    {
+      "client": "cam_06",
+      "num_images": 388,
+      "num_identities": 370,
+      "num_captions": 776,
+      "cameras": {
+        "6": 388
+      },
+      "images_per_identity": 1.05
+    },
+    {
+      "client": "cam_07",
+      "num_images": 2045,
+      "num_identities": 1968,
+      "num_captions": 4090,
+      "cameras": {
+        "7": 2045
+      },
+      "images_per_identity": 1.04
+    },
+    {
+      "client": "cam_08",
+      "num_images": 297,
+      "num_identities": 290,
+      "num_captions": 594,
+      "cameras": {
+        "8": 297
+      },
+      "images_per_identity": 1.02
+    },
+    {
+      "client": "cam_09",
+      "num_images": 115,
+      "num_identities": 114,
+      "num_captions": 230,
+      "cameras": {
+        "9": 115
+      },
+      "images_per_identity": 1.01
+    },
+    {
+      "client": "cam_10",
+      "num_images": 410,
+      "num_identities": 228,
+      "num_captions": 820,
+      "cameras": {
+        "10": 410
+      },
+      "images_per_identity": 1.8
+    },
+    {
+      "client": "cam_11",
+      "num_images": 1820,
+      "num_identities": 1393,
+      "num_captions": 3640,
+      "cameras": {
+        "11": 1820
+      },
+      "images_per_identity": 1.31
+    },
+    {
+      "client": "cam_12",
+      "num_images": 1187,
+      "num_identities": 1105,
+      "num_captions": 2374,
+      "cameras": {
+        "12": 1187
+      },
+      "images_per_identity": 1.07
+    },
+    {
+      "client": "cam_13",
+      "num_images": 1521,
+      "num_identities": 1360,
+      "num_captions": 3042,
+      "cameras": {
+        "13": 1521
+      },
+      "images_per_identity": 1.12
+    },
+    {
+      "client": "cam_14",
+      "num_images": 3265,
+      "num_identities": 2307,
+      "num_captions": 6530,
+      "cameras": {
+        "14": 3265
+      },
+      "images_per_identity": 1.42
+    },
+    {
+      "client": "cam_15",
+      "num_images": 999,
+      "num_identities": 952,
+      "num_captions": 1998,
+      "cameras": {
+        "15": 999
+      },
+      "images_per_identity": 1.05
+    }
+  ],
+  "strategy": "camera",
+  "client_files": [
+    "clients/cam_01.json",
+    "clients/cam_02.json",
+    "clients/cam_03.json",
+    "clients/cam_04.json",
+    "clients/cam_05.json",
+    "clients/cam_06.json",
+    "clients/cam_07.json",
+    "clients/cam_08.json",
+    "clients/cam_09.json",
+    "clients/cam_10.json",
+    "clients/cam_11.json",
+    "clients/cam_12.json",
+    "clients/cam_13.json",
+    "clients/cam_14.json",
+    "clients/cam_15.json"
+  ]
+}

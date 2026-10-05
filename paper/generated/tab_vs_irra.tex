@@ -1,0 +1,11 @@
+\begin{tabular}{l r l cc cc}
+\toprule
+ & & & \multicolumn{2}{c}{Peak (best of $N$)} & \multicolumn{2}{c}{Converged (mean)}\\
+\cmidrule(lr){4-5}\cmidrule(lr){6-7}
+Setting & Params & Loss & R@1 & mAP & R@1 & mAP\\
+\midrule
+IRRA, full FT$^{a}$ & 195M & SDM+ID+MLM & 60.20 & 47.17 & 58.73\,$\pm$\,0.22 & 46.65\,$\pm$\,0.03\\
+C1-true: LoRA $r{=}4$, centralized$^{b}$ & 0.49M & SDM & 58.85 & 45.56 & 57.18\,$\pm$\,0.28 & 45.42\,$\pm$\,0.13\\
+B5 (run 1): LoRA $r{=}4$, FL camera$^{c}$ & 0.49M & SDM & -- & -- & 57.05 (r.30) & 44.63 (r.30)\\
+\bottomrule
+\end{tabular}

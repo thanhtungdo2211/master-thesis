@@ -1,0 +1,33 @@
+\section{Next steps}\label{sec:next}
+
+The order of the tasks is: first make the current measurements reliable, then add new methods.
+
+\begin{table}[t]
+\centering\small
+\caption{Next tasks, in order of priority.}\label{tab:next}
+\begin{tabularx}{\textwidth}{c >{\raggedright\arraybackslash}p{6.4cm} X}
+\toprule
+\# & Task & Purpose\\
+\midrule
+\multicolumn{3}{l}{\textit{Group 1 -- make the baseline reliable}}\\
+1 & Run B5 again with the C1-true settings (cosine schedule), until the curve is flat, with $\ge3$ seeds & Measure the FL gap correctly\\
+2 & Run C1 (centralized, new optimizer each epoch) & Separate the effect of the data split from the effect of the optimizer reset\\
+3 & Label the test identities by group; calculate R@1 and mAP for each group & Test ``FedAvg leaves group B behind''\\
+4 & Save \texttt{best.pt} at the highest mAP, not R@1 & Do not select a noise peak\\
+\multicolumn{3}{l}{\textit{Group 2 -- complete the experiment plan}}\\
+5 & B3 (IID, LoRA) & Measure the non-IID gap\\
+6 & B4 (camera, full) and centralized full fine-tuning with SDM only & Measure the PEFT gap, separately from the loss effect\\
+7 & Rank sweep $r\in\{2,4,8,16\}$ with $\alpha=2r$ & Test the rank-limit hypothesis\\
+\multicolumn{3}{l}{\textit{Group 3 -- methods (possible contributions)}}\\
+8 & FFA-LoRA, FLoRA, LoRA-FAIR in the same pipeline & Correct the aggregation bias (O2)\\
+9 & FedNova normalization in \texttt{fedavg} & Correct the $n_k^2$ effective weight\\
+10 & Clustered FL (IFCA \citep{ghosh2021efficientframeworkclusteredfederated}, CFL \citep{sattler2019clusteredfederatedlearningmodelagnostic}) for the two groups & Use the two-group structure\\
+11 & UP-Person and DM-Adapter in FL & Test other PEFT methods under O2 and O3\\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+Two tasks without experiments are also necessary: a systematic survey of FL + PEFT + vision-language models, and a reproduction of one UP-Person or DM-Adapter result with the code in \texttt{reference/}.
+
+\section{Conclusion}\label{sec:conclusion}
+We built a FedAvg + LoRA + CLIP + SDM pipeline for TBPS and trained it on RSTPReid with 15 camera clients. LoRA $r=4$ trains \numTrainPct\% of the parameters and sends \numUplinkLoRA\,MiB per client per round. The centralized LoRA model converges at R@1 \numCPlatR{} and mAP \numCPlatM. This is \numGapIrraConvR\pp{} R@1 below IRRA on the same measure. The FL model gets near this value when the number of rounds increases. The camera partition has two identity groups, and the training loss of the two groups separates during FL. The next tasks make these measurements reliable (more seeds, complete runs), then test methods for the LoRA aggregation bias and for the two-group non-IID data.

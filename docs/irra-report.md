@@ -1,0 +1,130 @@
+- id loss
+    - **ID loss**
+        - ID loss coi mỗi danh tính (person ID) trong tập train là một lớp, rồi huấn luyện một bài toán phân loại closed-set thông thường trên global embedding — giống hệt phân loại ảnh, chỉ khác "lớp" là "người số mấy".
+        - Công thức: `L_ID = ½ [ CE(W·f_v, y) + CE(W·f_t, y) ]`, trong đó `W` là một classifier tuyến tính DÙNG CHUNG cho cả ảnh và chữ, `y` là chỉ số danh tính đúng.
+        - Code: `compute_id` (model/objectives.py:74-81) chỉ đơn giản là `nn.CrossEntropyLoss` cộng cho image_logits và text_logits rồi chia 2; `image_logits/text_logits = classifier(f_v)/classifier(f_t)` (model/build.py); `labels = batch['pids']` — chỉ số danh tính cố định (0..11002 trên CUHK).
+        - Điểm mấu chốt: công thức KHÔNG so trực tiếp f_v với f_t. Ảnh tự đấu với W, chữ tự đấu với W — hai phép CE độc lập, chỉ gặp nhau gián tiếp qua việc dùng chung ma trận W.
+        - Vì dùng chung W, cả hai modality buộc phải tham chiếu cùng một bộ tâm lớp (mỗi hàng của W ~ một prototype đại diện cho một người) → đây là lực căn chỉnh gián tiếp, yếu, giữa hai modality.
+        - Đặc trưng học được: gradient kéo f_v (và f_t) về phía prototype đúng, đẩy xa mọi prototype khác → mọi ảnh/câu của cùng một người bị nén thành một cụm trong không gian embedding, tách biệt với cụm người khác.
+        - Vì sao giúp "đoán đúng ID" lại có ích cho retrieval: nếu embedding cùng danh tính đã bị kéo sát thành cụm, thì cosine similarity giữa câu truy vấn và ảnh đúng tự nhiên nhỏ hơn ảnh sai — mà không cần train trực tiếp trên cặp ảnh–câu nào.
+        - Nhược điểm cố hữu: ID loss chỉ tạo cấu trúc cụm BÊN TRONG từng modality (ảnh-với-ảnh, chữ-với-chữ), không đảm bảo cụm ảnh và cụm chữ của cùng một người thực sự trùng vị trí — vì không có phép so f_v ↔ f_t nào cả. Việc căn chỉnh xuyên-modal là việc của SDM/IRR.
+        - Bằng chứng từ ablation của IRRA: dùng ID loss một mình làm Rank-1 GIẢM so với CLIP baseline (CUHK: 68.19 → 65.33; ICFG: 56.74 → 53.38) — đúng vì nó tối ưu bài toán phân loại, không tối ưu thứ hạng cross-modal, chỉ có ích khi SDM/IRR đã giữ hai modality gần nhau từ trước.
+        - Khi inference, classifier W bị bỏ hoàn toàn (11.003 lớp vô nghĩa với người lạ trong tập test — identity-disjoint split); chỉ có gradient đã cập nhật vào hai CLIP encoder là còn giá trị.
+        - Loss này KHÔNG phải phát minh riêng của IRRA — chính là "ID loss"/"identity loss" tiêu chuẩn trong bài toán Person Re-ID (ảnh-với-ảnh, không văn bản), có từ trước CLIP rất lâu; docstring trong code dẫn nguồn arXiv:1711.05535.
+        - Là thành phần cốt lõi trong "Bag of Tricks and a Strong Baseline for Deep Person Re-identification" (Luo et al., 2019) — bài kinh điển Re-ID, thường kết hợp ID loss (softmax CE) + Triplet loss + BNNeck.
+        - Cùng họ ý tưởng "dùng classification làm proxy cho metric learning" xuất hiện trong face recognition (softmax loss và biến thể có margin như ArcFace, CosFace, SphereFace) và image retrieval nói chung: train phân loại theo nhãn, sau đó bỏ classifier và chỉ dùng embedding tầng trước để đo khoảng cách.
+        - Đóng góp riêng của IRRA không nằm ở bản thân ID loss, mà ở việc dùng chung một W cho cả hai modality — biến một loss vốn chỉ dành cho ảnh-với-ảnh thành một lực căn chỉnh (yếu, gián tiếp) giữa ảnh và chữ.
+    - **CLIP contrastive (InfoNCE) & so sánh với ID loss**
+        - CLIP contrastive (InfoNCE, `compute_itc`, model/objectives.py:50-71): tính cosine similarity giữa ảnh i và cả N câu trong batch → N điểm số → softmax → cross-entropy với nhãn = chỉ số i (câu đúng của ảnh i là câu thứ i trong batch, vì dữ liệu ghép đúng thứ tự); làm tương tự chiều ngược lại (mỗi câu so với N ảnh); cộng hai chiều.
+        - "Đúng text là 1, còn lại là 0" đúng về mặt khái niệm (một positive, còn lại negative), nhưng cơ chế thực thi KHÔNG phải N phép so sánh nhị phân độc lập — nó là MỘT phép softmax trên cả hàng, rồi cross-entropy ép xác suất dồn về đúng vị trí; softmax tự động vừa "kéo gần" logit đúng vừa "đẩy xa" toàn bộ N−1 logit sai trong cùng một phép tính (vì tổng xác suất luôn bằng 1).
+        - InfoNCE là loss dùng để pre-train CLIP gốc (Radford et al., 2021), bắt nguồn từ Oord et al., 2018 ("Representation Learning with Contrastive Predictive Coding").
+        - Khác biệt cấu trúc lớn nhất giữa hai loss: "lớp" của ID loss là 11.003 danh tính CỐ ĐỊNH xuyên suốt quá trình train (closed-set); "lớp" của InfoNCE là VỊ TRÍ TRONG BATCH hiện tại, thay đổi theo từng batch, không gắn với danh tính.
+        - InfoNCE có so ảnh với chữ trực tiếp (bản chất phép tính chính là f_v · f_t); ID loss thì không.
+        - Nhược điểm của InfoNCE mà IRRA phải sửa: giả định chỉ MỘT positive trên đường chéo — nếu batch có nhiều ảnh/câu cùng một danh tính, các cặp đó bị coi nhầm là negative. SDM sửa đúng chỗ này bằng cách xây phân phối nhãn q từ nhãn danh tính (mọi cặp cùng PID đều là positive) thay vì one-hot theo chỉ số cặp.
+        - Tóm một câu: ID loss = phân loại theo danh tính, mượn nguyên từ Re-ID cổ điển, giúp mỗi modality tự gom cụm theo người nhưng không tự tạo alignment giữa hai modality; InfoNCE/SDM = đối sánh trong batch, so trực tiếp ảnh với chữ, đây mới là cơ chế thực sự kéo cặp đúng lại gần nhau và đẩy xa cặp sai.
+- mlm head
+    - **Ý tưởng gốc (BERT), cơ chế masking, và kiến trúc MLM head**
+        - MLM (Masked Language Modeling) là kỹ thuật pretraining kinh điển của BERT: che (mask) ngẫu nhiên một số token trong câu, rồi bắt mô hình đoán lại token gốc dựa vào ngữ cảnh xung quanh.
+        - Cách masking trong IRRA (`datasets/bases.py:170-210`, hàm `_build_random_masked_tokens_and_labels`) giống hệt BERT: mỗi token có 15% xác suất bị chọn để xử lý — trong đó 80% thay bằng token `<mask>`, 10% thay bằng token ngẫu nhiên, 10% giữ nguyên. Nhãn (`mlm_labels`) = id token gốc tại vị trí bị chọn, còn lại là 0 (bị ignore trong loss).
+        - Điểm khác BERT: BERT chỉ dùng self-attention trên chính câu văn để đoán từ bị che. IRRA kết hợp thêm ảnh làm ngữ cảnh — đây là phần "Implicit Relation Reasoning" (IR) trong tên model IRRA.
+        - Kiến trúc (`model/build.py:26-60`, chỉ được xây khi có `mlm` trong `loss_names`): `cross_attn` (nn.MultiheadAttention, Query=text/Key,Value=ảnh) → `cross_modal_transformer` (vài lớp transformer, `cmt_depth`) → `mlm_head` (Linear(dim→dim) → QuickGELU → LayerNorm → Linear(dim→vocab_size)).
+        - Forward pass (`build.py:125-141`): `mlm_feats = base_model.encode_text(mlm_ids)` (feature từng token của câu bị che, chưa pool) → `x = cross_former(mlm_feats, image_feats, image_feats)` (Query=text, Key/Value=toàn bộ patch ảnh, chưa pool) → `x = mlm_head(x)` → phân phối xác suất trên vocab cho từng vị trí token.
+        - Nói cách khác: head này không chỉ nhìn văn bản — mỗi token bị che sẽ "hỏi" (cross-attention) toàn bộ patch của ảnh xem "ở đây nên là từ gì", rồi qua transformer + head kiểu BERT để dự đoán từ gốc.
+        - Mục đích: buộc mô hình học liên kết chi tiết, cục bộ giữa từng vùng ảnh và từng từ trong câu (ví dụ để đoán đúng từ "đỏ" bị che, model phải "nhìn" vào vùng ảnh có màu đỏ trên áo). Đây chính là lý do gọi là "Implicit Relation Reasoning" — reasoning ngầm giữa các phần nhỏ của ảnh và text, không có nhãn attention nào được cung cấp tường minh, model tự học ra sự tương ứng này chỉ từ áp lực phải đoán đúng từ.
+    - **So sánh với ID loss / SDM loss, và ý nghĩa tổng thể**
+        - So với ID loss (input: feature ảnh/text đã pool qua 1 `nn.Linear` classifier chung; cơ chế: cross-entropy phân loại cả ảnh và text vào đúng ID người; học được: đặc trưng toàn cục, phân biệt định danh — ảnh và text cùng 1 người phải rơi vào cùng lớp, không quan tâm chi tiết nội dung câu).
+        - So với SDM loss (input: similarity giữa embedding ảnh và text toàn batch; cơ chế: KL-divergence giữa phân phối softmax similarity và phân phối nhãn soft theo ID; học được: căn chỉnh toàn cục ảnh↔text theo kiểu contrastive mềm — kéo các cặp cùng ID lại gần trong không gian embedding chung, không xét từng từ/vùng ảnh cụ thể).
+        - MLM loss (input: từng token bị che + toàn bộ patch ảnh qua cross-attention; cơ chế: cross-entropy đoán từ gốc; học được: liên kết cục bộ, chi tiết (fine-grained) giữa vùng ảnh và từ ngữ cụ thể — thứ mà ID loss và SDM loss, vì chỉ dùng feature đã pool toàn cục, hoàn toàn không nắm được).
+        - Sự khác biệt cốt lõi: ID loss và SDM loss chỉ hoạt động trên vector embedding đã pool (1 vector đại diện cho cả ảnh, 1 vector cho cả câu) → chúng học "ảnh này và câu này có cùng nói về 1 người không" ở mức toàn cục. MLM loss hoạt động ở mức token-level + patch-level thông qua cross-attention, nên ép mô hình học quan hệ ngữ nghĩa chi tiết (từ nào ứng với vùng ảnh nào) — bổ sung thông tin mà hai loss kia bỏ sót, giúp biểu diễn cuối cùng giàu thông tin hơn cho bài toán text-to-image person retrieval.
+        - Vì sao buộc phải "nhìn ảnh" mới đoán được từ: với câu "người phụ nữ mặc áo [MASK] và quần jean", nếu chỉ dựa vào ngữ cảnh text (như BERT gốc) thì không thể đoán đúng màu áo vì thông tin đó chỉ tồn tại trong ảnh. Model chỉ tối thiểu hoá được loss nếu học được cách: xác định từ bị che thuộc thuộc tính nào (màu sắc, ở vị trí "áo"), cross-attend đúng vào vùng patch ảnh chứa cái áo (không phải nền hay quần), rồi đọc màu sắc từ đặc trưng thị giác vùng đó và ánh xạ ngược thành token từ vựng.
+        - ID loss và SDM loss chỉ nhìn thấy 2 vector đã nén (CLS/EOT) — mọi chi tiết không gian (áo ở đâu, tóc ở đâu) đã bị "trung bình hoá" mất trong pooling, hai loss này không có cơ chế nào ép giữ lại thông tin đó. MLM loss lấp khoảng trống này: buộc encoder ảnh phải giữ lại thông tin không gian/cục bộ trong các patch feature (không dồn hết vào CLS), và buộc encoder text phải biểu diễn được từng thuộc tính riêng lẻ trong câu (không chỉ 1 embedding tổng quát) — các đặc trưng chi tiết này lan ngược gradient vào chính CLIP encoder gốc nên cũng cải thiện luôn chất lượng `i_feats`/`t_feats` dùng cho SDM và ID.
+        - Tại sao chỉ nhánh text "được dự đoán" nhưng cả hai nhánh cùng học: `mlm_head` chỉ xuất dự đoán cho vị trí token text, nhưng vì `image_feats` được dùng làm Key/Value trong `cross_attn`, gradient của `mlm_loss` chảy ngược vào cả `encode_image` (qua `image_feats`) lẫn `encode_text` (qua `mlm_feats`), cộng thêm cập nhật cho 3 module mới (`cross_attn`, `cross_modal_transformer`, `mlm_head`) — MLM loss đồng thời huấn luyện cả hai encoder gốc, chỉ là "bài kiểm tra" đầu ra được đặt ở phía text.
+        - Tóm tắt: MLM head = module fusion (cross-attention + transformer + head kiểu BERT) chèn sau hai encoder CLIP, nhận Query là token text bị che và Key/Value là toàn bộ patch ảnh chưa pool, huấn luyện bằng cross-entropy để đoán lại từ gốc — mượn cơ chế masking 15%/80-10-10 của BERT nhưng thay ngữ cảnh "chỉ trong text" bằng "text + ảnh", qua đó ép model học quan hệ ngữ nghĩa chi tiết, cục bộ giữa từng từ và từng vùng ảnh (Implicit Relation Reasoning) — thông tin mà ID loss và SDM loss không có cách nào nắm bắt được.
+- sdm loss
+    - **SDM loss là gì và vì sao dùng KL divergence**
+        - SDM (Similarity Distribution Matching) là loss chính để căn chỉnh ảnh–text trong IRRA (`model/objectives.py:6-42`, gọi từ `model/build.py:106-107`).
+        - Nhãn (`labels`) không phải ma trận đơn vị (identity matrix) như CLIP, mà là ma trận theo `pid` (person ID): `labels = (pid - pid.t() == 0)` — bất kỳ cặp (ảnh i, text j) nào cùng `pid` đều là positive, dù không phải "cặp gốc" trong batch.
+        - Có thêm cơ chế soft label bằng `image_id`: `labels = (labels - image_id_mask) * factor + image_id_mask` — cùng ảnh chính xác → trọng số 1 (rất tin cậy); cùng người khác ảnh → trọng số `factor=0.3` (positive nhưng kém tin cậy hơn). Đây là nhãn soft/graded, không chỉ 0/1.
+        - Similarity giữa ảnh và text được scale bởi `logit_scale` (giống temperature của CLIP) trước khi đưa vào softmax.
+        - `labels_distribute = labels / labels.sum(dim=1)` chuẩn hoá mỗi hàng của ma trận nhãn thành một phân phối xác suất (uniform trên các positive).
+        - `i2t_loss`/`t2i_loss` trong code chính xác là công thức KL divergence: `KL(P‖Q) = Σ P·(logP − logQ)`.
+        - Trong đó P = `i2t_pred` (softmax similarity ảnh↔tất cả text trong batch — phân phối model dự đoán), Q = `labels_distribute` (phân phối nhãn thật, uniform trên các text cùng `pid`).
+        - Loss đo "phân phối tương đồng model tạo ra" lệch bao xa so với "phân phối khớp đúng theo identity" — vì vậy gọi là Similarity Distribution Matching: match hai phân phối xác suất, không phải phân loại đúng 1 lớp.
+    - **Vì sao không dùng InfoNCE của CLIP thẳng, và SDM là bản tổng quát hoá**
+        - `compute_itc` (`model/objectives.py:50-71`) chính là InfoNCE gốc của CLIP: `labels = torch.arange(batch_size)` — nhãn đúng nằm trên đường chéo, chỉ MỘT positive duy nhất cho mỗi anchor.
+        - Giả định "1 positive duy nhất" đúng với CLIP vì dữ liệu web-scale gần như không có 2 ảnh/text trùng nhau trong cùng batch.
+        - Giả định đó sai với Text-Based Person Search: một `pid` thường có nhiều ảnh và nhiều câu mô tả; khi sample vào batch, rất dễ có 2-3 ảnh/caption cùng người nhưng không nằm trên đường chéo.
+        - Nếu dùng InfoNCE gốc, những cặp cùng người nhưng lệch đường chéo đó bị ép thành negative sai — gọi là false negative problem — gradient sẽ đẩy các cặp lẽ ra phải gần nhau ra xa, gây nhiễu quá trình học.
+        - Ý tưởng của SDM giống InfoNCE: đều kéo cặp ảnh-text khớp lại gần nhau, đẩy cặp không khớp ra xa, dùng softmax của similarity đã scale nhiệt độ.
+        - Khác biệt do đặc thù bài toán: quan hệ ảnh↔text trong Person Search là many-to-many (1 người → nhiều ảnh, nhiều caption), không phải bijection 1-1 như CLIP, nên không thể dùng one-hot label + cross-entropy (= InfoNCE) một cách an toàn.
+        - SDM giải quyết bằng cách xây nhãn multi-hot/soft dựa trên `pid`, chuẩn hoá thành phân phối xác suất, rồi dùng KL divergence để ép phân phối similarity model dự đoán khớp với phân phối nhãn đó — cho phép nhiều positive cùng lúc thay vì chỉ 1.
+        - Về mặt toán học, InfoNCE là trường hợp đặc biệt của SDM: nếu label matrix chỉ có đường chéo = 1 (mỗi ảnh chỉ khớp đúng 1 text), `labels_distribute` trở thành one-hot, và `KL(pred‖one-hot)` rút gọn đúng thành cross-entropy = InfoNCE.
+        - Vậy SDM là "InfoNCE tổng quát hoá" để xử lý nhiều positive trong cùng batch — sinh ra chính vì đặc thù many-to-many (1 danh tính có nhiều ảnh, và có nhiều câu mô tả text) của Text-Based Person Search.
+- special tokens
+    - IRRA dùng tokenizer kiểu CLIP (BPE), không phải BERT, nên phía text **không có** token `[CLS]` theo đúng nghĩa BERT; hai nhánh (ảnh / text) có hai loại "token đặc biệt" khác nhau, dễ nhầm lẫn nên cần tách rõ.
+    - **`[CLS]` — phía ảnh (Vision Transformer)**
+        - `[CLS]` = viết tắt của **"Classification token"**, xuất hiện đầu tiên trong BERT (Devlin et al., 2018): thêm vào đầu câu, vector tại vị trí đó sau Transformer được dùng làm input cho classification head — nên có tên CLS.
+        - Về sau tên `[CLS]` được dùng chung cho bất kỳ token đặc biệt nào đóng vai trò "vector đại diện tổng hợp cho toàn chuỗi", kể cả khi không dùng để classification mà dùng cho retrieval (như CLIP/IRRA) — tên giữ nguyên theo thói quen dù mục đích đã mở rộng.
+        - Trong code: `self.class_embedding = nn.Parameter(scale * torch.randn(width))` (`model/clip_model.py:277`) — chính cái tên biến `class_embedding` là dấu vết của nguồn gốc "classification".
+        - Bản chất: **1 vector học được duy nhất, KHÔNG phụ thuộc ảnh đầu vào** — lúc khởi tạo giống hệt nhau cho mọi ảnh, chưa chứa thông tin ảnh nào.
+        - **Được chèn khi nào**: ngay trong `VisionTransformer.forward` (`model/clip_model.py:287-305`), mỗi lần model chạy — sau bước patch embedding (`conv1`), trước khi cộng positional embedding. Không phải bước tiền xử lý dữ liệu như SOT/EOT bên text.
+        - Luồng forward: `conv1` patchify ảnh → `[B, num_patches, width]` → `torch.cat([class_embedding, patches], dim=1)` chèn CLS ở **vị trí 0** → `+ positional_embedding` (CLS cũng có 1 positional embedding riêng cho vị trí 0) → `transformer` (self-attention **đầy đủ/bidirectional**, mọi token thấy mọi token, không mask) → `ln_post` → `@ self.proj`.
+        - **Vì sao CLS đại diện được cả ảnh**: mỗi `patch_i` gắn với 1 vùng ảnh cụ thể nên chỉ mang thông tin **cục bộ**; CLS không gắn vùng nào cả, nó là "chỗ trống" nhưng được tham gia self-attention cùng toàn bộ patch → được phép "hỏi" tất cả patch và tổng hợp câu trả lời thành output của chính nó.
+            - Layer 1: `CLS_out = Σ attention_weight(CLS, patch_i) × Value(patch_i)` — hút thông tin từ mọi patch, **có trọng số** (không phải trung bình cộng đều).
+            - Layer 2..L: patch đã được làm giàu ngữ cảnh từ layer trước, CLS tiếp tục hút → càng sâu, CLS càng tổng hợp ở mức trừu tượng/toàn cục hơn.
+            - Sau L lớp, vector tại vị trí CLS không còn "trống" mà đã thành bản tóm tắt có trọng số học được của toàn bộ ảnh, qua nhiều tầng biến đổi phi tuyến.
+        - **Vì sao cần thêm token thay vì trung bình cộng patch**: Transformer chuẩn output ra N vector (1 cho mỗi token input), không tự sinh thêm 1 vector tổng. Hai lựa chọn: (1) Global Average Pooling — ra được 1 vector nhưng trọng số **cố định, đều nhau** cho mọi patch kể cả patch nền vô nghĩa; (2) thêm token "ảo" CLS — để attention **tự học** cách tổng hợp có trọng số, thay đổi theo layer và theo nội dung ảnh (ví dụ ảnh người: patch vùng mặt/quần áo được chú ý nhiều hơn patch nền). CLIP/IRRA chọn cách (2).
+        - **Cắt vector CLS ra như thế nào**: `self.proj` được áp cho **TOÀN BỘ sequence** (CLS + mọi patch), `width (768) → embed_dim (512)`, ra `[B, num_patches+1, 512]`; sau đó `i_feats = image_feats[:, 0, :]` (`model/build.py:83, 96`) chỉ đơn giản là **slice tĩnh index 0** theo chiều sequence — vì CLS luôn nằm cố định ở vị trí đầu tiên.
+    - **`[SOT]` / `[EOT]` — phía text (CLIP text encoder)**
+        - Text encoder CLIP **không có** token `[CLS]`, thay vào đó dùng `<|startoftext|>` (SOT/SOS) và `<|endoftext|>` (EOT/EOS).
+        - **Được chèn khi nào**: **KHÔNG** chèn trong model forward như CLS, mà chèn lúc tokenize caption — hàm `tokenize` ở `datasets/bases.py:42-57`, gọi trong `ImageTextDataset.__getitem__` (`datasets/bases.py:75-90`), tức là chạy ở **CPU, trong DataLoader**, mỗi khi lấy 1 sample.
+        - Code: `tokens = [sot_token] + tokenizer.encode(caption) + [eot_token]`, rồi `result[:len(tokens)] = tokens` → mỗi hàng có dạng `[SOT, w1, w2, ..., wn, EOT, 0, 0, ..., 0]`, batch `caption_ids` shape `[B, 77]`, phần còn lại pad 0.
+        - Forward (`model/clip_model.py:411-425`): `token_embedding(text) + positional_embedding` → `transformer(x, attn_mask=causal_mask)` → `ln_final` → `@ text_projection` (cũng áp cho toàn bộ sequence).
+        - Điểm khác biệt cốt lõi so với ảnh: text encoder dùng **causal (masked) self-attention** (`build_attention_mask` tạo mask tam giác, token `i` chỉ nhìn được token `≤ i`), trong khi ảnh dùng attention **đầy đủ/bidirectional**.
+        - **Vì sao EOT "gom" được cả câu mà SOT thì không**: do causal attention, token càng ở cuối càng thấy nhiều ngữ cảnh; EOT là token cuối cùng của nội dung thật (trước phần pad) nên là vị trí **duy nhất đã "nhìn thấy" toàn bộ câu** → đóng đúng vai trò pooling mà `[CLS]` đảm nhiệm trong BERT, chỉ khác là nằm ở **cuối** chuỗi chứ không phải đầu.
+        - SOT chỉ là marker mở đầu cố định (giữ đúng format tokenize gốc của CLIP để tương thích pretrained weights), **không** được dùng làm pooled feature.
+        - **Cắt vector EOT ra như thế nào**: `t_feats = text_feats[torch.arange(B), caption_ids.argmax(dim=-1)]` (`model/build.py:87-88, 98`) — **không** phải slice tĩnh mà là **gather động theo từng sample**: `argmax(dim=-1)` tìm vị trí có token-id lớn nhất, chính là EOT vì `<|endoftext|>` được thêm cuối cùng vào vocab nên có id lớn nhất (`utils/simple_tokenizer.py:75`), còn pad = 0 luôn nhỏ nhất. Mỗi câu dài ngắn khác nhau → vị trí EOT khác nhau → không thể dùng 1 slice chung cho cả batch.
+    - **Vector 512-D cuối cùng chính là CLS (ảnh) và EOT (text)**
+        - **Đúng**: output cuối cùng sau projection xuống 512-D ở nhánh ảnh chính là vector CLS, ở nhánh text chính là vector EOT — không qua bước pooling/biến đổi nào thêm.
+        - Ý nghĩa: bản tóm tắt ngữ nghĩa toàn ảnh / toàn câu, sống trong **không gian nhúng chung (joint embedding space)** cùng 512 chiều, để tính cosine similarity trực tiếp giữa ảnh và caption.
+        - Đây chính là `image_fetures` / `text_fetures` được đưa thẳng vào `compute_sdm`, `compute_itc`, `compute_cmpm` — và qua `classifier` cho `compute_id` (`model/build.py:103-115`).
+        - Ở inference/retrieval: `i_feats` (CLS) chính là image embedding dùng để search, so similarity với `t_feats` (EOT) — không có bước trung gian nào khác.
+    - **Các token này là tham số học được**
+        - `class_embedding = nn.Parameter(...)` (`model/clip_model.py:277`) — 1 vector duy nhất, được backprop cập nhật mỗi bước training giống mọi weight khác.
+        - SOT/EOT chỉ là 2 id trong vocab, embedding của chúng là **2 hàng trong `nn.Embedding(vocab_size, transformer_width)`** (`model/clip_model.py:358`) — học y hệt embedding của các từ bình thường.
+        - Luồng gradient (backward): `loss (sdm/itc/id)` → phụ thuộc `cosine(i_feats, t_feats)` → `i_feats = image_feats[:,0,:]` → gradient chảy ngược vào `proj`, các lớp Transformer, **và** `class_embedding` (và cả `conv1` vì patch token bắt nguồn từ đó) → `t_feats` → chảy vào `text_projection`, Transformer layers, **và** đúng hàng embedding của EOT (gián tiếp cả SOT vì nó nằm trong context mà mọi token sau attend tới).
+        - Điểm quan trọng: gradient không chỉ cập nhật `class_embedding`, mà cập nhật **toàn bộ trọng số attention quyết định "CLS nên hút thông tin từ đâu"**. Vì loss đo trực tiếp "vector CLS của ảnh này có giống vector caption đúng của nó không", nên qua hàng nghìn bước train, mạng học được cách để CLS tổng hợp đúng thứ cần thiết để phân biệt ảnh này với ảnh khác trong không gian chung với text — đây không phải hệ quả phụ mà chính là mục tiêu huấn luyện.
+    - **Nhánh MLM không dùng vector pooled**
+        - `model/build.py:125-136`: `mlm_feats = encode_text(...)` giữ **toàn bộ sequence** (không lấy riêng EOT), `image_feats` giữ **toàn bộ patch** (không chỉ CLS), rồi `cross_former(...)` → `mlm_head(x)`.
+        - Lý do: MLM cần dự đoán lại từ bị mask ở từng vị trí, mỗi token phải cross-attention với toàn bộ patch ảnh (key/value) để "suy luận quan hệ ngầm" (Implicit Relation Reasoning) — 1 vector CLS/EOT duy nhất không đủ chi tiết.
+    - **So sánh tổng hợp CLS (ảnh) vs EOT (text)**
+        - Chèn ở đâu:
+            - Ảnh `[CLS]`: trong `VisionTransformer.forward`, mỗi lần model chạy.
+            - Text `[EOT]`: trong `Dataset.__getitem__` (`tokenize()`), trước khi vào model.
+        - Attention:
+            - Ảnh `[CLS]`: full/bidirectional — mọi token thấy nhau.
+            - Text `[EOT]`: causal — token chỉ thấy token trước nó.
+        - Vị trí pooling:
+            - Ảnh `[CLS]`: cố định, index 0 (slice tĩnh).
+            - Text `[EOT]`: động, `argmax(id)` = vị trí EOT, khác nhau mỗi sample.
+        - Projection:
+            - Ảnh `[CLS]`: `proj` áp lên cả chuỗi, sau đó mới slice CLS.
+            - Text `[EOT]`: `text_projection` áp lên cả chuỗi, sau đó mới gather EOT.
+        - Bản chất:
+            - Ảnh `[CLS]`: `nn.Parameter` học trực tiếp.
+            - Text `[EOT]`: 2 hàng trong `nn.Embedding` (vocab), học như từ bình thường.
+        - Dùng ở loss:
+            - Ảnh `[CLS]`: `sdm`, `itc`, `cmpm`, `id` (qua `i_feats`).
+            - Text `[EOT]`: `sdm`, `itc`, `cmpm`, `id` (qua `t_feats`).
+        - Nhánh MLM:
+            - Ảnh: dùng **toàn bộ** patch token, không chỉ CLS.
+            - Text: dùng **toàn bộ** token sequence, không chỉ EOT.
+    - **Các mô hình ViT khác có dùng `[CLS]` không?**
+        - Có, khá phổ biến nhưng **không phải universal**:
+            - **ViT gốc** (Dosovitskiy et al., *An Image is Worth 16x16 Words*, 2020) — nơi khai sinh kỹ thuật này, copy trực tiếp ý tưởng `[CLS]` của BERT.
+            - **CLIP's ViT** (chính là base model IRRA đang dùng) — dùng CLS y như trên.
+            - **DeiT** — dùng CLS token, thêm 1 "distillation token" thứ hai cho knowledge distillation.
+            - **MAE** (Masked Autoencoder) — vẫn giữ CLS token trong encoder.
+        - Không dùng CLS:
+            - **Swin Transformer** (kiến trúc phân cấp, windowed attention) — thường dùng global average pooling trên feature map cuối thay vì CLS token.
+        - Ngay trong paper ViT gốc, ablation (Appendix D.3) chỉ ra dùng **GAP thay CLS cho kết quả tương đương**, miễn tinh chỉnh learning rate phù hợp — tức CLS không phải điều kiện cần để ViT hoạt động tốt, mà là **lựa chọn thiết kế** (chọn chủ yếu để giữ tương đồng kiến trúc với Transformer gốc/BERT, dễ so sánh).

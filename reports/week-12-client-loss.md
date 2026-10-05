@@ -3,6 +3,7 @@
 > Dữ liệu: run thật `data/runs/B5_camera_lora4_v2_20260709/` (partition `camera`, `lora_rank=4`, `client_fraction=1.0` — cả 15 client tham gia mọi round, `local_epochs=1`, `batch_size=64`). Run đã hoàn thành **21/25 round** (dừng giữa chừng, có thể do Colab disconnect — `checkpoint.pt` cho phép resume tiếp).
 > Nguồn số liệu: `client_loss.csv` (315 dòng = 21 round × 15 client) và `log.csv`, đọc trực tiếp bằng script, không suy diễn.
 > Đối chiếu với hai báo cáo tuần trước: cấu trúc partition (`reports/week-11-partition.md`) và cơ chế FedAvg/LoRA (`reports/week-11.md`).
+> **Bổ sung mục 7:** baseline centralized `data/runs/C1_true_centralized_lora4_20261309/` (20 round = 20 epoch, `--persistent_optimizer`, `--lr_schedule cosine`, `--eval_every 1`) — đã chạy xong, dùng để trả lời nhiệm vụ #3 của mục 8.
 
 ---
 
@@ -138,12 +139,158 @@ Client 2 (112 sample, **chỉ 1 step/round** do `drop_last=True` cắt mất 42.
 
 ---
 
-## 7. Tóm tắt & việc tiếp theo
+## 7. Baseline centralized LoRA (C1-true) — trần trên của pipeline
+
+> Run: `data/runs/C1_true_centralized_lora4_20261309/`. Toàn bộ 18,505 ảnh trong **1 client**
+> (FedAvg là phép đồng nhất → 1 round = 1 epoch), `--persistent_optimizer` (một `AdamW` duy nhất
+> sống suốt run — training centralized đúng nghĩa, không bị reset moment mỗi epoch như đường code FL),
+> `--lr_schedule cosine --warmup_rounds 3`, LoRA r=4 α=8, 20 epoch, batch 64, seed 42.
+> 491,520 / 150,109,185 tham số trainable (**0.33%**). Tổng 8,573 s ≈ 2.4 h, `--eval_every 1`.
+
+### 7.1 Kết quả
+
+| | R@1 | R@5 | R@10 | mAP | mINP |
+|---|---|---|---|---|---|
+| **Best-of-20** (round 9 / 14) | **58.85** | 80.30 | 89.15 | **45.56** | **24.14** |
+| **Mức hội tụ** (mean round 15–20) | **57.18** ± 0.28 | 80.92 | 88.57 | **45.42** ± 0.13 | 23.84 ± 0.13 |
+| CLIP zero-shot (mốc IRRA repo) | 54.05 | – | – | – | – |
+| IRRA full FT + IRR + MLM + ID | 60.20 | – | – | – | – |
+
+Train loss giảm đơn điệu 21.16 → 8.07 và **vẫn đang giảm** ở epoch 20.
+
+![centralized vs FL](../data/runs/C1_true_centralized_lora4_20261309/centralized_vs_fl.png)
+
+### 7.2 R@1 là tiêu chí chọn model tệ — mAP ổn định hơn 2.6 lần
+
+Trên các round đã hội tụ (10–20), độ biến thiên tương đối của hai chỉ số chênh nhau rõ rệt:
+
+| Chỉ số | Mean (r10–20) | Std | **CV** |
+|---|---|---|---|
+| R@1 | 57.04 | 0.43 | **0.0076** |
+| mAP | 45.42 | 0.13 | **0.0029** |
+
+R@1 chỉ đếm **hit ở vị trí 1** trên 2,000 caption query → là một ước lượng nhị thức, sai số chuẩn
+lý thuyết $\sqrt{p(1-p)/n} \approx 1.1$ pp so với giá trị thật. mAP trung bình trên **toàn bộ thứ hạng**
+của mọi query nên nhiễu bị san phẳng.
+
+**Hệ quả trực tiếp lên code:** `main.py` lưu `best.pt` theo `metrics["R@1"] > best_r1`, tức là lấy
+**max của 20 lần đo trên chỉ số nhiễu nhất**. Kết quả là nó chọn round 9 (58.85) — cao hơn mức hội tụ
+thật **+1.67 pp**. Nhìn sang mAP thì round 9 (45.455) còn *thua* round 14 (45.561), và đường mAP đã
+phẳng từ round 8, tức là mô hình ở round 9 **không hề tốt hơn** mô hình ở round 20 — nó chỉ gặp may
+ở top-1 của lần đo đó.
+
+> **Khuyến nghị cho luận văn:** báo cáo **mức hội tụ** (mean của k round cuối) làm số chính, kèm
+> best-of trong ngoặc và nói rõ nó là max-of-N. Nếu vẫn muốn chọn checkpoint tự động thì đổi tiêu chí
+> sang mAP. Bảng nào chỉ ghi "best R@1" của các run có **số lần eval khác nhau** là bảng so sánh sai:
+> run nào eval nhiều lần hơn thì được rút nhiều lá bài hơn, và sẽ thắng chỉ vì thế. Đây chính là
+> trường hợp so C1-true (20 lần eval) với B5 (4 lần eval) trong mục 7.4 — phải so ở cùng round.
+
+### 7.3 LR schedule + persistent optimizer **không nâng trần** — kết quả âm, nhưng hữu ích
+
+Tuần trước có một run centralized theo cấu hình cũ (lr hằng số 1e-4, optimizer bị tạo lại mỗi epoch —
+đường code FL). Run đó chỉ tồn tại trong console log, chưa tải về `data/runs/`, nên đây là đối chiếu
+tham khảo chứ không phải số từ file:
+
+| Round | Cũ: lr hằng số + reset opt | Mới (C1-true): cosine + persistent |
+|---|---|---|
+| 5 | loss 12.14 · R@1 57.45 · mAP 44.12 | loss 12.92 · R@1 54.15 · mAP 42.64 |
+| 10 | loss 9.58 · R@1 56.35 · mAP 45.03 | loss 9.98 · R@1 57.00 · mAP 45.19 |
+| 15 | loss 7.77 · R@1 57.20 · mAP **45.51** | loss 8.45 · R@1 57.55 · mAP 45.35 |
+| 20 | loss **6.42** · R@1 55.90 · mAP 44.85 | loss **8.07** · R@1 56.95 · mAP 45.42 |
+
+Hai điều đọc được:
+
+1. **Trần không đổi.** mAP tốt nhất: cũ 45.51 (r15) vs mới 45.56 (r14) — chênh 0.05, tức là bằng nhau.
+   Giả thuyết đặt ra khi sửa code ("lr hằng số khiến Adam nhảy quanh cực tiểu, thêm cosine sẽ kéo R@1 lên")
+   **không được số liệu ủng hộ**. Ghi nhận là kết quả âm.
+2. **Nhưng overfit giảm rõ.** Ở cùng epoch 20, run mới có train loss **cao hơn** (8.07 vs 6.42) mà test
+   metric lại **bằng hoặc tốt hơn** (mAP 45.42 vs 44.85). Đúng dấu hiệu của regularization: model mới học
+   thuộc train ít hơn mà tổng quát hóa không kém. Warmup cũng làm epoch 1–5 chậm hơn (R@1 54.15 vs 57.45
+   ở r5) — cái giá phải trả, và nó hoàn lại từ round 10.
+
+Kết luận thực chất: **57.2 / mAP 45.4 là trần của cấu hình hiện tại, và trần đó do *loss function* quyết định,
+không phải do optimizer hay lr.** Bằng chứng: train loss vẫn đang giảm mạnh ở 8.07 khi test metric đã phẳng
+12 round — model **không** bị giới hạn capacity, nó đang học thuộc. Thêm rank hay thêm epoch sẽ không giúp;
+thứ còn thiếu là tín hiệu huấn luyện (IRRA dùng SDM **+ IRR + MLM + ID loss**, pipeline này chỉ có SDM).
+
+### 7.4 FL gap: chi phí của federation là **số round**, không phải chất lượng cuối
+
+So ở **cùng số round** (1 round FL ≈ 580 step ≈ 1 epoch centralized, nên đây là so compute-matched):
+
+| Round | B5 FL camera (run 2) | C1-true centralized | Gap R@1 | Gap mAP |
+|---|---|---|---|---|
+| 5 | 47.50 / 36.51 | 54.15 / 42.64 | **+6.65** | +6.13 |
+| 10 | 53.55 / 40.64 | 57.00 / 45.19 | **+3.45** | +4.54 |
+| 15 | 55.85 / 42.33 | 57.55 / 45.35 | **+1.70** | +3.03 |
+| 20 | 56.20 / 43.30 | 56.95 / 45.42 | **+0.75** | +2.12 |
+| 30 (run 1) | 57.05 / 44.63 | *(đã phẳng: 57.18 / 45.42)* | +0.13 | +0.79 |
+
+**Gap thu hẹp đơn điệu, không bão hòa ở một mức dương cố định.** Ở round 30, B5 run 1 đạt mAP 44.63 —
+chỉ còn cách plateau centralized **0.79 mAP**, và vẫn đang leo. Nói cách khác, với partition camera này
+**FedAvg không hạ trần accuracy, nó chỉ cần nhiều round hơn để tới nơi** (~1.5× số round).
+
+Điều đó có ý nghĩa tốt cho luận đề: chi phí của federation ở đây quy về **truyền thông**, mà truyền thông
+chính là thứ LoRA làm rẻ đi — 1.88 MB × 15 client = 28.2 MB/round, 30 round ≈ 0.83 GB tổng, so với
+8.4 GB **mỗi round** nếu full fine-tune. Trả thêm 50% số round trên một kênh rẻ hơn 300 lần vẫn là lời.
+
+**Ba cảnh báo phải ghi kèm khi trích bảng này:**
+
+1. **Hai thế hệ run bị trộn.** C1-true dùng cosine + persistent optimizer; B5 dùng lr hằng số + reset
+   optimizer mỗi round. Con số gap là **chỉ dấu, chưa phải phép đo sạch**. Muốn sạch thì chạy lại B5 bằng
+   cell 12 của notebook (cùng cosine, 20 round).
+2. **C1-true còn được lợi thế mà FL về mặt cấu trúc không thể có** — optimizer giữ state suốt run. Một phần
+   của gap là "optimizer có trí nhớ", không phải "dữ liệu bị phân tán". Run **C1 (FL-symmetric)** — cùng
+   cosine nhưng optimizer bị reset mỗi round như FL — mới tách được hai thành phần này. **Chưa chạy.**
+3. B5 chỉ eval mỗi 5 round nên chỉ có 4–6 điểm; đường cong FL trong hình là nội suy thô giữa các điểm đó.
+
+### 7.5 Run này **không** trả lời được câu hỏi gap Nhóm A/B
+
+Nhiệm vụ #3 ở mục 8 đặt vấn đề: *"nếu gap A/B biến mất hoàn toàn ở centralized, xác nhận nguyên nhân nằm ở
+cơ chế FedAvg"*. Run centralized **không thể** kiểm chứng điều đó: chỉ có 1 client nên `client_loss.csv` chỉ
+có 1 dòng mỗi round, không còn cấu trúc nhóm nào để đo. Nó cho **trần trên**, không cho **phân rã theo nhóm**.
+
+Muốn kiểm chứng giả thuyết A/B vẫn phải làm đúng việc đã đề xuất ở mục 8: **gắn nhãn cụm A/B/bridge cho
+200 identity trong test set, rồi tách R@1/mAP theo cụm trong `evaluate.py`**. Khi đó mới so được
+"centralized có gap A/B không" với "FL có gap A/B bao nhiêu" — và C1-true chính là mẫu đối chứng cần có
+sẵn cho phép so đó. Theo nghĩa đó run này là **điều kiện cần đã hoàn thành**, không phải câu trả lời.
+
+### 7.6 PEFT gap
+
+Với **0.33% tham số** (491,520 / 150M), LoRA đạt 57.2 hội tụ / 58.85 best-of, so với:
+
+- **CLIP zero-shot 54.05** → **+3.1 / +4.8 R@1**. LoRA r=4 chỉ chạm vào `q,k,v,out_proj` là đủ để vượt rõ.
+- **IRRA full FT 60.20** → **−3.0 / −1.35 R@1**. Nhưng IRRA fine-tune **toàn bộ 150M** tham số *và* có thêm
+  IRR + MLM + ID loss. Phần thiếu hụt này (xem 7.3) đến từ **loss function**, không từ PEFT.
+
+Điều đáng viết vào luận văn: **không tách được "PEFT gap" ra khỏi "loss gap" bằng cặp số hiện có.** Muốn
+đo PEFT gap sạch phải có baseline **full fine-tune + chỉ SDM, centralized** — tức là chính cell B4 nhưng ở
+chế độ centralized. Đây là một ô trống trong bảng thí nghiệm, nên bổ sung.
+
+---
+
+## 8. Tóm tắt & việc tiếp theo
 
 1. **CV loss giữa client tăng 0.072 → 0.200** qua 21 round — heterogeneity không giảm dù mean loss tổng vẫn giảm đều.
 2. **Gap Nhóm A/B tăng đơn điệu 2.58 → 4.55** — khớp chính xác với cấu trúc 2 cụm identity phát hiện ở tuần 11, là bằng chứng thực nghiệm (không còn là suy luận) cho hiện tượng non-IID "hai chế độ".
 3. Tương quan **n_samples ↔ loss cuối = −0.69** (bỏ ngoại lệ) — cỡ dữ liệu vẫn là yếu tố chính, nhưng **containment/identity-sharing với client lớn cùng cụm** (client 2, 6) có thể giúp "ăn theo", còn **client hub của cụm yếu (13, 10)** vẫn chịu thiệt dù kết nối tốt trong cụm.
-4. **Việc tiếp theo (đã đưa vào `reports/roadmap-next-tasks.md`):**
-   - Rank sweep (nhiệm vụ #2) — kiểm chứng giả thuyết rank compression bằng cách xem gap A/B có thu hẹp khi tăng `lora_rank` hay không.
-   - Centralized-LoRA baseline (nhiệm vụ #3) — nếu gap A/B biến mất hoàn toàn ở centralized, xác nhận nguyên nhân nằm ở cơ chế FedAvg (trọng số $n_k^2$ + rank compression), không phải bản thân dữ liệu/kiến trúc.
-   - Đề xuất bổ sung: gắn nhãn cụm A/B/bridge cho test set, tách R@1/mAP theo cụm ở `evaluate.py` để xác nhận gap loss huấn luyện có phản ánh ra gap accuracy hay không.
+4. **Baseline centralized (mục 7, nhiệm vụ #3 — đã chạy xong):** trần trên của pipeline là
+   **57.18 R@1 hội tụ / 58.85 best-of**, mAP 45.42. Ba điều rút ra:
+   - **FL không hạ trần, chỉ làm chậm** — gap so centralized thu hẹp đơn điệu 6.65 → 0.75 R@1 từ round 5
+     đến round 20, và ở round 30 FL chỉ còn cách 0.79 mAP. Chi phí của federation ở partition này quy về
+     **số round** (≈1.5×), tức về truyền thông — đúng thứ LoRA làm rẻ (28.2 MB/round cho cả 15 client).
+   - **R@1 là tiêu chí chọn model tệ** — CV 0.0076 so với 0.0029 của mAP. `best.pt` chọn theo R@1 nên lấy
+     đúng đỉnh nhiễu, cao hơn mức hội tụ thật 1.67 pp. Mọi bảng so sánh phải so **ở cùng round**, không so
+     "best R@1" giữa các run có số lần eval khác nhau.
+   - **Trần 57.2 do loss function quyết định, không do optimizer/lr** — cosine + persistent optimizer
+     *không* nâng được trần (kết quả âm, mục 7.3), trong khi train loss vẫn đang giảm ở 8.07 lúc test metric
+     đã phẳng 12 round. Thứ còn thiếu so với IRRA 60.20 là IRR + MLM + ID loss, không phải capacity của LoRA.
+5. **Việc tiếp theo** (danh sách này chưa được đồng bộ vào `reports/roadmap-next-tasks.md` — cần cập nhật riêng)**:**
+   - Rank sweep (nhiệm vụ #2) — kiểm chứng giả thuyết rank compression bằng cách xem gap A/B có thu hẹp khi tăng `lora_rank` hay không. **Lưu ý mới từ mục 7.3:** train loss centralized vẫn đang giảm khi test metric đã phẳng → bài toán là overfit chứ không phải thiếu capacity, nên nhiều khả năng đường cong rank sẽ **phẳng hoặc hình chữ U ngược**. Đó vẫn là kết quả đáng báo cáo ("r=4 đã bão hòa, trả thêm uplink không mua được gì"), nhưng đừng kỳ vọng nó thu hẹp gap tới IRRA.
+   - **Chạy C1 (FL-symmetric)** — cùng cosine nhưng optimizer bị reset mỗi round như FL. Đây là mảnh còn
+     thiếu để tách "chi phí phân tán dữ liệu" khỏi "chi phí optimizer mất trí nhớ" trong con số gap ở mục 7.4.
+   - **Chạy lại B5 bằng cell 12** (cosine, 20 round) — bảng gap hiện tại đang trộn hai thế hệ run
+     (C1-true cosine vs B5 lr hằng số), nên chỉ là chỉ dấu.
+   - **Bổ sung ô trống: full fine-tune + chỉ SDM, centralized** — không có baseline này thì không tách được
+     "PEFT gap" khỏi "loss gap" (mục 7.6).
+   - Gắn nhãn cụm A/B/bridge cho test set, tách R@1/mAP theo cụm ở `evaluate.py` — **vẫn là việc bắt buộc**
+     để kiểm chứng giả thuyết A/B; run centralized không thay thế được (mục 7.5).

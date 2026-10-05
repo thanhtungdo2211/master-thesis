@@ -1,0 +1,84 @@
+\section{The pipeline \texttt{clip\_lora\_fedavg}}\label{sec:pipeline}
+
+We built the pipeline in \texttt{experiments/clip\_lora\_fedavg/}. This section agrees with the code. The pipeline is a baseline: plain LoRA, SDM only and plain FedAvg. It is not a copy of UP-Person in FL.
+
+\begin{figure}[t]
+\centering
+\fit{\begin{tikzpicture}[
+  box/.style={draw,rounded corners=2pt,align=center,font=\footnotesize,minimum height=8mm,fill=blue!5,draw=blue!50!black},
+  srv/.style={box,fill=green!8,draw=green!40!black,minimum width=36mm,minimum height=22mm},
+  frz/.style={box,fill=black!6,draw=black!50,text width=46mm,minimum height=22mm},
+  arr/.style={-{Stealth[length=2.2mm]},thick,draw=black!65}]
+\node[srv] (S) at (0,0) {\textbf{Server}\\global state $\theta^{(t)}$\\$=\{A,B\}$ of 96 modules};
+\node[box,minimum width=34mm] (c1) at (6.2,1.6) {Client 1 (camera 1), $n_1$};
+\node[box,minimum width=34mm] (c2) at (6.2,0) {Client $k$, $n_k$};
+\node[box,minimum width=34mm] (c3) at (6.2,-1.6) {Client 15 (camera 15), $n_{15}$};
+\node[frz] (M) at (11.4,0) {\textbf{Local training}\\CLIP ViT-B/16 \textbf{frozen}\\+ LoRA on Q, K, V, O\\SDM loss, AdamW, 1 epoch};
+\foreach \c in {c1,c2,c3}{
+  \draw[arr] ([yshift=2pt]S.east |- \c.west) -- ([yshift=2pt]\c.west);
+  \draw[arr,dashed,draw=red!60!black] ([yshift=-2pt]\c.west) -- ([yshift=-2pt]S.east |- \c.west);
+}
+\draw[arr,densely dotted] (c2.east) -- (M.west);
+\node[font=\scriptsize] at (3.1,2.35) {$\rightarrow$ send $\theta^{(t)}$\quad\textcolor{red!60!black}{$\leftarrow$ return $\theta_k^{(t+1)},n_k$ (\numUplinkLoRA\,MiB)}};
+\node[align=center,font=\footnotesize,below=9mm of S,text width=60mm] (agg) {Aggregation: $\theta^{(t+1)}=\sum_k\frac{n_k}{N}\theta_k^{(t+1)}$\\(each tensor separately)};
+\draw[arr,dashed] (S) -- (agg);
+\end{tikzpicture}}
+\caption{One FedAvg round. The clients send only the LoRA matrices (\numTrainable{} parameters). All clients use the same frozen CLIP model.}
+\label{fig:pipeline}
+\end{figure}
+
+\subsection{Model}
+\begin{itemize}[leftmargin=1.5em]
+  \item Base model: \texttt{openai/clip-vit-base-patch16} (HuggingFace).
+  \item Image size: $384{\times}128$, the same as IRRA, UP-Person and DM-Adapter. The code interpolates the position embedding from a $14{\times}14$ grid to a $24{\times}8$ grid (192 patches).
+  \item Text: CLIP BPE tokenizer, length 77.
+  \item Training augmentation: horizontal flip, pad and random crop, random erasing ($p=0.5$).
+  \item One sample is one image and one of its two captions. Thus, one image gives two samples in each epoch.
+\end{itemize}
+
+\subsection{LoRA}\label{sec:lora}
+The code replaces each linear layer with the name \texttt{q\_proj}, \texttt{k\_proj}, \texttt{v\_proj} or \texttt{out\_proj} by $y=Wx+\frac{\alpha}{r}BAx$, with $r=4$ and $\alpha=8$. $W$ is frozen. $A$ has Kaiming initialization. $B$ starts at zero, so the model starts equal to CLIP. The code applies LoRA to both encoders: $12\text{ layers}\times4\text{ matrices}\times2\text{ encoders}=96$ modules. All other parameters are frozen.
+
+The number of trainable parameters is: $48\times4\times(768+768)=294\,912$ (image encoder, width 768) plus $48\times4\times(512+512)=196\,608$ (text encoder, width 512). The total is \textbf{\numTrainable} of \numTotalParams{} parameters (\numTrainPct\%). This value agrees with \texttt{args.json}.
+
+Difference from UP-Person: UP-Person puts LoRA only on K and V, with $r=16$ on RSTPReid, and adds a prefix and an adapter. Thus, we do not compare our numbers directly with UP-Person as ``PEFT against PEFT''.
+
+\subsection{Loss}
+The loss is SDM (\cref{eq:sdm}). Our code uses binary labels by identity. The IRRA code also gives a soft weight of 0.3 to ``same person, different image''. We did not measure the effect of this difference.
+
+\subsection{FedAvg}
+\Cref{alg:fedavg} shows one run. One GPU cannot hold 15 CLIP models. Thus, the code keeps one model and trains the clients one after the other. All clients start from the same global state, so the result is the same as parallel FedAvg.
+
+\begin{algorithm}[t]
+\caption{FedAvg with LoRA ($E=1$ local epoch, batch size 64)}\label{alg:fedavg}
+\KwIn{clients $\mathcal{K}$ ($|\mathcal{K}|=15$), rounds $T$, learning rate $\eta_t$}
+Set $\theta^{(1)}$: $A$ with Kaiming initialization, $B=0$, for the 96 modules\;
+\For{$t=1,\dots,T$}{
+  \ForEach{client $k\in\mathcal{K}$}{
+    load $\theta^{(t)}$; make a new AdamW optimizer with learning rate $\eta_t$\;
+    train $A,B$ for $E$ epochs on $\mathcal{D}_k$ with SDM; clip the gradient norm at 5\;
+    send $\theta_k^{(t+1)}$ and $n_k=|\mathcal{D}_k|$ to the server\;
+  }
+  $\theta^{(t+1)}\gets\sum_k\frac{n_k}{N}\theta_k^{(t+1)}$, with $N=\sum_k n_k$ \tcp*{each tensor separately}
+  each \texttt{eval\_every} rounds: test $\theta^{(t+1)}$ on the central test set\;
+}
+\end{algorithm}
+
+Other settings from the code: AMP with fp16 (the loss is in fp32), \texttt{drop\_last=True}. The optimizer is new for each client in each round. This is correct for FedAvg, because the clients have no state.
+
+\paragraph{Communication cost.} Each client sends \numTrainable{} fp32 values in each round: \numUplinkLoRA\,MiB. Full fine-tuning sends \numUplinkFull\,MiB. The ratio is \numUplinkRatio$\times$. For 15 clients, one round is \numUplinkRoundLoRA\,MiB (full fine-tuning: \numUplinkRoundFull\,GiB).
+
+\paragraph{Inference.} The server deploys one global model: frozen CLIP + the averaged LoRA. The local LoRA states are only inputs to the average.
+
+\subsection{Known limitation: LoRA aggregation bias}\label{sec:bias}
+FedAvg averages $A$ and $B$ separately. With $s=\alpha/r$:
+\begin{equation}\label{eq:bias}
+s\Big(\sum_k\tfrac{n_k}{N}B_k\Big)\Big(\sum_k\tfrac{n_k}{N}A_k\Big)\;\neq\;s\sum_k\tfrac{n_k}{N}B_kA_k .
+\end{equation}
+This gives three problems:
+\begin{enumerate}[label=(\alph*)]
+  \item \textbf{Cross terms.} The product contains $B_kA_{k'}$ with $k\neq k'$. It mixes the factors of different clients.
+  \item \textbf{Rank.} The correct average can have rank up to $Kr$. The averaged factors give rank $\le r$.
+  \item \textbf{Non-unique factors.} $BA=(BT)(T^{-1}A)$ for each invertible $T$. Two clients can learn the same $\Delta W$ with different $A$ and $B$.
+\end{enumerate}
+The baseline accepts this bias. Known corrections are FFA-LoRA \citep{sun2024improvingloraprivacypreservingfederated} (freeze $A$, average only $B$), FLoRA \citep{wang2024florafederatedfinetuninglarge} and LoRA-FAIR \citep{bian2025lorafairfederatedlorafinetuning}. FedIT \citep{zhang2024buildingfederatedgptfederated} also identifies the problem. We did not run these methods yet.

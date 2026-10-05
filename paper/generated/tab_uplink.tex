@@ -1,0 +1,12 @@
+\begin{tabular}{l l r r}
+\toprule
+Method & Tuning & Trainable params & Est. uplink (MiB/client/round)\\
+\midrule
+CFine & full & 205M & 782\\
+IRRA & full & 195M & 744\\
+CSKT & PETL & 12M & 46\\
+DM-Adapter & PETL (MoE-Adapter) & 16M & 61\\
+UP-Person & PETL (LoRA+Prefix+Adapter) & 7.4M & 28\\
+\textbf{This pipeline} (LoRA $r{=}4$, Q,K,V,O) & LoRA & 0.49M & 1.88\\
+\bottomrule
+\end{tabular}

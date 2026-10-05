@@ -1,0 +1,60 @@
+\section{Experimental setup}\label{sec:setup}
+
+\subsection{Data and camera partition}\label{sec:partition}
+The RSTPReid training set has \numTotImg{} images, \numTotID{} identities and 37\,010 captions. Each file name contains the camera ID. Each camera is one client, so there are 15 clients. The server keeps the test set: 200 identities, 1\,000 gallery images and 2\,000 text queries. \Cref{tab:partition} in \cref{app:tables} gives the data of each client.
+
+\result{The camera partition is not a uniform non-IID split. It has three properties:
+(1)~the client sizes are very different;
+(2)~the cameras make two groups that share almost no identities;
+(3)~FedAvg gives the large clients a weight that is approximately proportional to $n_k^2$.}
+
+\begin{enumerate}[leftmargin=1.5em]
+  \item \textbf{Size.} A client has from \numImgMin{} to \numImgMax{} images (ratio \numImgRatio). The CV of the size is \numCVSize. The five largest clients have \numFiveShareNom\% of the data.
+  \item \textbf{Two groups.} One identity is on 4.21 cameras on average. Only 0.2\% of the identities are on one camera only. But the containment matrix $|A\cap B|/\min(|A|,|B|)$ shows two blocks:
+  \begin{itemize}
+    \item \textbf{Group A}: cameras 1, 3, 5, 7, 14, 15 (\numImgA{} images, \numShareA\%).
+    \item \textbf{Group B}: cameras 2, 6, 8, 9, 10, 11, 12, 13 (\numImgB{} images, \numShareB\%).
+    \item \textbf{Bridge}: camera 4 (\numShareC\%).
+  \end{itemize}
+  Inside a group, the cameras share many identities (for example, 0.92 for cameras 1 and 7). Between the groups, they share almost none (0.02 for cameras 1 and 2). Thus, the skew is domain skew inside a group and label skew between the groups. The mean pairwise Jaccard (0.124, in \texttt{partition\_stats.json}) hides this structure.
+  \item \textbf{Effective weight.} With $E=1$, client $k$ does $S_k=\lfloor n_k/64\rfloor$ steps. FedAvg multiplies the update by $n_k/N$. Thus, the effective weight is approximately proportional to $n_kS_k\propto n_k^2$ \citep{wang2020tacklingobjectiveinconsistencyproblem}. The two largest clients have \numTwoShareNom\% of the data, but \numTwoShareEff\% of the update. The smallest client has \numNomTwo\% of the data, but only \numEffTwo\% of the update. Also, \texttt{drop\_last=True} removes 42.9\% of the samples of the smallest client.
+\end{enumerate}
+
+\subsection{Runs}
+All runs use: seed 42, CLIP ViT-B/16, image size $384{\times}128$, LoRA $r=4$, $\alpha=8$ on Q, K, V, O, batch size 64, AdamW (peak learning rate $10^{-4}$, weight decay 0.02), $\tau=0.02$, one local epoch, gradient clip 5.0, AMP. The test always uses the global model on the central test set. \Cref{tab:runs} gives the three runs.
+
+\begin{table}[t]
+\centering\small
+\caption{The three runs (from \texttt{args.json} and \texttt{log.csv}). B5 run 1 and run 2 have the same settings. Only the planned number of rounds is different. With a constant learning rate, this number has no effect on the training.}\label{tab:runs}
+\fit{\begin{tabular}{l l l l l l l}
+\toprule
+Run & Setting & Planned & Completed & Test & Learning rate & Optimizer\\
+\midrule
+C1-true & centralized (1 client) & 20 epochs & 20 & each epoch & cosine, 3 warm-up rounds & one AdamW for the full run\\
+B5 run 1 & FL, 15 camera clients & 50 rounds & \numBoneLast{} (stopped) & each 5 rounds & constant $10^{-4}$ & new AdamW each round\\
+B5 run 2 & FL, 15 camera clients & 25 rounds & \numBtwoLast{} (stopped) & each 5 rounds & constant $10^{-4}$ & new AdamW each round\\
+\bottomrule
+\end{tabular}}
+\end{table}
+
+\Cref{tab:grid} shows the full experiment plan. Only C1-true and B5 have results now. Thus, we cannot measure the non-IID gap and the PEFT gap yet.
+
+\begin{table}[t]
+\centering\small
+\caption{Experiment plan (from \texttt{experiments/README.md}) and status.}\label{tab:grid}
+\fit{\begin{tabular}{l l l l l}
+\toprule
+ID & Setting & Data split & Tuning & Status\\
+\midrule
+B2 & FL & IID & full & not run\\
+B3 & FL & IID & LoRA & not run\\
+B4 & FL & camera & full & not run\\
+\textbf{B5} & FL & camera & LoRA $r=4$ & \textbf{2 runs, both stopped early}\\
+C1 & centralized, new optimizer each epoch & -- & LoRA & not run\\
+\textbf{C1-true} & centralized, one optimizer & -- & LoRA $r=4$ & \textbf{complete (20 epochs)}\\
+Rank sweep & FL & camera & LoRA $r\in\{2,8,16\}$ & notebook cells exist, no results\\
+\bottomrule
+\end{tabular}}
+\end{table}
+
+\caution{Both B5 runs stopped early (possibly a Colab disconnect). C1-true uses a different learning-rate schedule and optimizer setting than B5. All runs use one seed only.}

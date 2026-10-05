@@ -1,0 +1,122 @@
+\section{Results}\label{sec:results}
+
+The script \texttt{scripts/gen\_tables.py} makes all numbers in this section from \texttt{results/*.csv}.
+
+\subsection{Centralized LoRA (C1-true)}\label{sec:ceiling}
+
+\result{With $r=4$ (\numTrainPct\% of the parameters) and SDM only, the centralized model converges at R@1 $=\numCPlatR\pm\numCPlatRsd$ and mAP $=\numCPlatM\pm\numCPlatMsd$ (mean of epochs 15--20). The peak R@1 (\numCBestR) is \numCOverR\pp{} higher than the converged value. Report the converged value and mAP, not the peak R@1.}
+
+\Cref{fig:curves} shows the test curves. The training loss decreases from \numCFirstLoss{} to \numCFinalLoss{} and continues to decrease at epoch 20. The test metrics are flat after approximately epoch 8. Thus, the model is not limited by capacity. It starts to overfit.
+
+\paragraph{R@1 is a noisy selection criterion.} In epochs 10--20, the coefficient of variation is \numCVR{} for R@1 and \numCVM{} for mAP. R@1 counts only the first position of 2\,000 queries, so its binomial standard error is approximately 1.1\pp. mAP uses the full ranking. The code saves \texttt{best.pt} at the highest R@1. Thus, it selects epoch \numCBestRround{} (R@1 \numCBestR, mAP \numCBestRmAP). The best mAP is at epoch \numCBestMround{} (\numCBestM). The model at epoch \numCBestRround{} is not better. It has a lucky top-1 result.
+
+\begin{figure}[t]
+\centering
+\begin{tikzpicture}
+\begin{groupplot}[group style={group size=2 by 1,horizontal sep=1.6cm},width=0.49\textwidth,height=5.6cm,
+  xlabel={Round (FL) / epoch (centralized)},grid=major,grid style={dotted,gray!50},tick label style={font=\footnotesize},
+  label style={font=\footnotesize},legend style={font=\scriptsize,at={(0.98,0.04)},anchor=south east,draw=none,fill=white,fill opacity=0.8}]
+\nextgroupplot[ylabel={R@1 (\%)},ymin=40,ymax=62,xmin=0,xmax=35]
+\addplot[black,thick,mark=*,mark size=1.2pt] table[col sep=comma,x=round,y=r1] {generated/curve_c1.csv};
+\addplot[blue!70!black,thick,mark=square*,mark size=1.6pt] table[col sep=comma,x=round,y=r1] {generated/curve_b5v1.csv};
+\addplot[red!70!black,thick,mark=triangle*,mark size=1.8pt] table[col sep=comma,x=round,y=r1] {generated/curve_b5v2.csv};
+\addplot[gray,dashed,domain=0:35] {\numIrraConvR};
+\legend{C1-true (centralized),B5 run 1 (FL),B5 run 2 (FL),IRRA converged}
+\nextgroupplot[ylabel={mAP (\%)},ymin=30,ymax=48,xmin=0,xmax=35]
+\addplot[black,thick,mark=*,mark size=1.2pt] table[col sep=comma,x=round,y=map] {generated/curve_c1.csv};
+\addplot[blue!70!black,thick,mark=square*,mark size=1.6pt] table[col sep=comma,x=round,y=map] {generated/curve_b5v1.csv};
+\addplot[red!70!black,thick,mark=triangle*,mark size=1.8pt] table[col sep=comma,x=round,y=map] {generated/curve_b5v2.csv};
+\addplot[gray,dashed,domain=0:35] {\numIrraConvM};
+\end{groupplot}
+\end{tikzpicture}
+\caption{Test curves on RSTPReid. Dashed line: IRRA converged value (mean of epochs 51--60 in the IRRA log). B5 has a test each 5 rounds. B5 run 1 stopped at round \numBoneLast{}, run 2 at round \numBtwoLast{}. One FL round has approximately the same number of optimizer steps as one centralized epoch.}
+\label{fig:curves}
+\end{figure}
+
+\subsection{Comparison with IRRA (full fine-tuning)}\label{sec:vsirra}
+
+\result{On the same converged measure, centralized LoRA + SDM is \numGapIrraConvR\pp{} R@1 and \numGapIrraConvM\pp{} mAP below IRRA. It is not approximately 3\pp{}. That value compares the IRRA peak (60.20) with our converged value. The gap contains two causes: PEFT, and the ID + MLM losses of IRRA. The current data cannot separate them.}
+
+\begin{table}[t]
+\centering\small
+\caption{Comparison on the same measure. ``Peak'': maximum of all tests. ``Converged'': mean $\pm$ standard deviation of the last tests (IRRA: epochs 51--60; C1-true: epochs 15--20). $^{a}$Log in \texttt{data/irra\_rtsp} with \texttt{loss\_names: sdm+id+mlm}. Its timestamp is 2023-03-17, so it is probably the log that the IRRA authors released. We did not confirm the source. $^{b}$One seed. $^{c}$One test at round 30. The run stopped at round \numBoneLast.}\label{tab:vsirra}
+\fit{\input{generated/tab_vs_irra.tex}}
+\end{table}
+
+Notes on \cref{tab:vsirra}:
+\begin{itemize}[leftmargin=1.5em]
+  \item The IRRA value 60.20 is the peak at epoch \numIrraBestEp{} of \numIrraNEval{} tests. The converged value is \numIrraConvR.
+  \item UP-Person reports 63.15 R@1 on RSTPReid. Our pipeline is $\ge4.3$\pp{} below. UP-Person uses LoRA on K and V with $r=16$, plus a prefix and an adapter (\cref{sec:lora}). We do not know if its value is a peak or a converged value.
+  \item The IRRA README has a ``CLIP baseline'' row with 54.05 R@1. We did not confirm the loss settings of this row. Thus, we do not use it for conclusions.
+\end{itemize}
+
+\subsection{FL compared with centralized training}\label{sec:flgap}
+
+\result{At the same round, the gap between FL and centralized training decreases in mAP: from more than 6\pp{} at round 5 to less than 1\pp{} at round 30. The FL model continues to improve when it stops. The data agree with the hypothesis ``FL needs more rounds, but it does not lower the final accuracy''. The data do not prove it, because the FL runs did not reach a flat curve.}
+
+\Cref{tab:flgap} compares B5 with C1-true at the same round. One FL round has 571 steps in total on the 15 clients. One centralized epoch has 578 steps. Thus, the comparison uses the same compute. In mAP, $\Delta$ decreases at each test in both runs. In R@1, the trend is the same, but with more noise.
+
+\begin{table}[t]
+\centering\small
+\caption{Gap between centralized and FL training at the same round. $\Delta_i=\text{C1-true}-\text{B5 run }i$ (percentage points). $^\dagger$C1-true is flat, so the value is the converged value (mean of epochs 15--20). ``--'': run 2 stopped at round \numBtwoLast. C1-true and B5 use different learning-rate and optimizer settings. Thus, $\Delta$ is an indication, not a clean measurement.}\label{tab:flgap}
+\fit{\input{generated/tab_flgap.tex}}
+\end{table}
+
+\paragraph{Noise between two equal runs.} B5 run 1 and run 2 have the same settings. Thus, their difference is an estimate of the run-to-run noise (\cref{tab:noise}). The maximum difference is \numNoiseR\pp{} in R@1 and \numNoiseM\pp{} in mAP. A difference in R@1 that is less than approximately 1.7\pp{} is not different from noise. This includes $\Delta$ at round 20. The mAP gap at round 30 is only approximately two times the mAP noise. We must use more seeds in the next runs.
+
+\begin{table}[t]
+\centering\small
+\caption{Two B5 runs with the same settings. The difference is a rough estimate of the run-to-run noise (two values at each round only).}\label{tab:noise}
+\input{generated/tab_noise.tex}
+\end{table}
+
+\paragraph{Communication.} One round with 15 clients sends \numUplinkRoundLoRA\,MiB. After 30 rounds, the log shows \numUplinkRthirty\,MiB in total. Full fine-tuning needs approximately \numUplinkFullThirty\,GiB for 30 rounds (estimate from the parameter count).
+
+\subsection{Differences between clients in FL}\label{sec:hetero}
+
+\result{The mean training loss decreases at each round. But the clients do not converge at the same rate. The loss separates into two bands that agree with the two identity groups (\cref{sec:partition}). The gap between the groups increases from \numGapFirst{} to \numGapLast. This is a result on the training loss only. We did not show that the retrieval accuracy for group B is lower.}
+
+The data come from \texttt{client\_loss.csv} of B5 run 2 (\numLastRound{} rounds $\times$ 15 clients). \Cref{tab:group} and \cref{fig:group} give the results:
+\begin{itemize}[leftmargin=1.5em]
+  \item The CV of the loss between the 15 clients increases from \numCVFirst{} (round 1) to \numCVLast{} (round \numLastRound).
+  \item The gap between group B and group A increases from \numGapFirst{} to \numGapLast.
+  \item The two trends are not monotonic. In \numSteps{} steps from one round to the next, the gap decreases \numGapDown{} times and the CV decreases \numCVDown{} times.
+  \item Client \numLowClient{} (the largest camera) has the lowest loss in \numLowCount{} of \numLastRound{} rounds. Client \numHiOne{} has the highest loss in \numHiOneCount{} rounds.
+  \item The correlation between client size and final loss is $r=\numPearsonAll$ ($r=\numPearsonNoTwo$ without client 2, which does only 1 step in each round). \Cref{tab:clientloss} in \cref{app:tables} gives all clients.
+\end{itemize}
+
+\begin{table}[t]
+\centering\small
+\caption{Mean SDM training loss of each camera group, B5 run 2. The CV uses the 15 clients (population standard deviation / mean).}\label{tab:group}
+\input{generated/tab_group.tex}
+\end{table}
+
+\begin{figure}[t]
+\centering
+\begin{tikzpicture}
+\begin{groupplot}[group style={group size=2 by 1,horizontal sep=1.6cm},width=0.49\textwidth,height=5.4cm,
+  xlabel={Round},grid=major,grid style={dotted,gray!50},tick label style={font=\footnotesize},label style={font=\footnotesize},
+  legend style={font=\scriptsize,draw=none,fill=white,fill opacity=0.8}]
+\nextgroupplot[ylabel={Mean SDM loss of the group},xmin=1,xmax=21,legend pos=north east]
+\addplot[blue!70!black,thick,mark=*,mark size=1.2pt] table[col sep=comma,x=round,y=groupA] {generated/group_loss.csv};
+\addplot[red!70!black,thick,mark=square*,mark size=1.4pt] table[col sep=comma,x=round,y=groupB] {generated/group_loss.csv};
+\addplot[green!40!black,thick,dashed] table[col sep=comma,x=round,y=bridge] {generated/group_loss.csv};
+\legend{Group A,Group B,Bridge (c4)}
+\nextgroupplot[ylabel={CV of the loss between clients},xmin=1,xmax=21]
+\addplot[black,thick,mark=*,mark size=1.2pt] table[col sep=comma,x=round,y=cv] {generated/group_loss.csv};
+\end{groupplot}
+\end{tikzpicture}
+\caption{Left: mean training loss of each group. Right: spread of the loss between the 15 clients.}
+\label{fig:group}
+\end{figure}
+
+\paragraph{Possible causes (hypotheses).}
+\begin{enumerate}[leftmargin=1.5em]
+  \item \textbf{Effective weight $\propto n_k^2$} (\cref{sec:partition}). Group A has the four largest clients (14, 1, 5, 7). Thus, the global update moves toward the minimum of group A.
+  \item \textbf{LoRA rank limit} (\cref{sec:bias}). The two groups are almost two domains. They possibly need two different adaptation directions. The averaged factors give rank $\le4$ only. A rank sweep can test this hypothesis: if a higher $r$ decreases the gap, hypothesis 2 is correct. If the gap does not change, cause 1 is more probable.
+\end{enumerate}
+
+\caution{Two items make the conclusion ``FedAvg leaves group B behind'' weaker.
+(1)~The values are training losses on the data of each client. \texttt{evaluate.py} does not know which test identity is in which group.
+(2)~The gap is already \numGapFirst{} at round 1. Thus, part of the gap can come from the data of group B (for example, camera 10 has 1.80 images per identity, most cameras have approximately 1.0), and not from FedAvg.
+To test this, (a)~label the 200 test identities as A, B or bridge and calculate R@1 and mAP for each group, and (b)~calculate the loss of the centralized model on the data of each group.}

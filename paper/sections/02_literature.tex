@@ -1,0 +1,47 @@
+\section{Lessons from the literature}\label{sec:lit}
+
+This section gives only the lessons that set the pipeline design. All numbers in this section are published by the authors. We did not reproduce them.
+
+\subsection{PEFT is equal to or better than full fine-tuning}
+\Cref{tab:ftvspeft} compares two full fine-tuning methods with three PEFT methods. All methods use CLIP ViT-B/16. UP-Person trains 3.8\% of the IRRA parameters and gets a higher R@1 on all three datasets. The advantage increases when the dataset is smaller: $+0.79$ (CUHK-PEDES), $+1.56$ (ICFG-PEDES), $+2.95$ (RSTPReid, 18\,505 training images). RSTPReid is the smallest dataset. Thus, we use RSTPReid.
+
+\begin{table}[t]
+\centering\small
+\caption{Full fine-tuning and PEFT on CLIP ViT-B/16: published R@1 (\%). Source: \texttt{docs/benchmark-baseline.md}.}\label{tab:ftvspeft}
+\fit{\begin{tabular}{l l r r r r}
+\toprule
+Method & Tuning & Trainable params & CUHK-PEDES & ICFG-PEDES & RSTPReid\\
+\midrule
+CFine \citep{yan2022clipdrivenfinegrainedtextimageperson} & full & 205M & 69.57 & 60.83 & 50.55\\
+IRRA \citep{jiang2023crossmodalimplicitrelationreasoning} & full & 195M & 73.38 & 63.46 & 60.20\\
+CSKT \citep{liu2024clipbasedsynergisticknowledgetransfer} & PEFT & 12M & 69.70 & 58.90 & 57.75\\
+DM-Adapter \citep{liu2025dmadapterdomainawaremixtureofadapterstextbased} & PEFT (mixture of adapters) & 16M & 72.17 & 62.64 & 60.00\\
+UP-Person \citep{liu2025uppersonunifiedparameterefficienttransfer} & PEFT (LoRA + prefix + adapter) & 7.4M & \textbf{74.17} & \textbf{65.02} & \textbf{63.15}\\
+\bottomrule
+\end{tabular}}
+\end{table}
+
+\subsection{The SDM loss alone is sufficient}
+IRRA uses three losses: SDM, ID and MLM (\cref{tab:loss}). UP-Person and DM-Adapter use SDM as the main loss. In the UP-Person ablation, SDM is better than InfoNCE by $+2.13$ R@1. ID and MLM give almost no improvement, but they increase the trainable parameters from 7.4M to 52.3M.
+
+\paragraph{SDM.} Let $Y_{ij}=1$ if sample $i$ and sample $j$ in the batch show the same person, else $0$. The target distribution is $q_{ij}=Y_{ij}/\sum_k Y_{ik}$. The predicted distribution is $p_{ij}=\mathrm{softmax}_j(c_{ij}/\tau)$, with $c_{ij}$ the cosine similarity between image $i$ and text $j$, and $\tau=0.02$. Then
+\begin{equation}\label{eq:sdm}
+\mathcal{L}_{\mathrm{SDM}}=\frac1N\sum_i\sum_j p_{ij}\log\frac{p_{ij}}{q_{ij}+\epsilon}\;+\;(\text{the same term from text to image}).
+\end{equation}
+InfoNCE is the special case where only the diagonal of $Y$ is 1. SDM has no trainable parameters. It uses only the relation ``same person'' inside a batch.
+
+\begin{table}[t]
+\centering\small
+\caption{The three IRRA losses and their effect on FedAvg.}\label{tab:loss}
+\begin{tabularx}{\textwidth}{l X l X}
+\toprule
+Loss & What it learns & Extra params & Effect on FedAvg\\
+\midrule
+SDM & Global image--text alignment. All pairs of the same person are positive. & None & Usable.\\
+ID & One class for each training identity, with a shared classifier $W$. & $W$ & \textbf{Not usable.} Each client has different identities, so $W$ has a different size and meaning.\\
+MLM & Local word--region relations, with a cross-attention block. & approx.\ 45M & Usable, but it adds approx.\ 172\,MB of uplink in each round.\\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\paragraph{Design decision.} The two lessons give one design for FL: \textbf{PEFT + SDM only}.

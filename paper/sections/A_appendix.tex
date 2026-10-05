@@ -1,0 +1,33 @@
+\section{Additional tables}\label{app:tables}
+
+\begin{table}[H]
+\centering\small
+\caption{The 15 camera clients, in order of size. ``Steps/round'' $=\lfloor n_k/64\rfloor$, with $n_k$ the number of samples (captions). ``\% effective'' $\propto n_k\lfloor n_k/64\rfloor$ is the real part of the global update when $E=1$. Generated from \texttt{partition\_stats.json}.}\label{tab:partition}
+\fit{\input{generated/tab_partition.tex}}
+\end{table}
+
+\begin{table}[H]
+\centering\small
+\caption{SDM training loss of each client at the first and the last round, B5 run 2, in order of size. For clients with $\le12$ steps per round, the loss is a noisy estimate.}\label{tab:clientloss}
+\fit{\input{generated/tab_client_loss.tex}}
+\end{table}
+
+\begin{table}[H]
+\centering\small
+\caption{Estimated uplink per client per round (fp32, 4 bytes for each parameter) if a method sends all its trainable parameters. The first five parameter counts are published values. The last row is measured.}\label{tab:uplink}
+\fit{\input{generated/tab_uplink.tex}}
+\end{table}
+
+\section{How to reproduce}\label{app:repro}
+\sloppy
+\paragraph{Build the report.} In \texttt{paper/}, run \texttt{python3 scripts/gen\_tables.py}, then \texttt{latexmk -pdf -outdir=build main.tex}. On Overleaf, use pdfLaTeX. The folder \texttt{generated/} is in the repository, so Overleaf does not need Python. Run \texttt{gen\_tables.py} again after a change in \texttt{results/}.
+
+\paragraph{Data sources.}
+\begin{itemize}[leftmargin=1.5em]
+  \item \texttt{results/B5\_v1\_log.csv}, \texttt{B5\_v2\_log.csv}, \texttt{B5\_v2\_client\_loss.csv}, \texttt{C1true\_log.csv}: copies from \texttt{data/runs/}.
+  \item \texttt{results/partition\_stats.json}: copy from \texttt{data/rstpreid\_fl\_camera/}.
+  \item \texttt{results/irra\_rstp\_train\_log.txt}, \texttt{irra\_rstp\_configs.yaml}: copies from \texttt{data/irra\_rtsp/}.
+  \item Published values (\cref{tab:ftvspeft}) come from \texttt{docs/benchmark-baseline.md}.
+\end{itemize}
+
+\paragraph{Run commands.} See \texttt{experiments/README.md}. B5: \texttt{--partition camera --tuning lora --lora\_rank 4 --lora\_alpha 8}. C1-true: \texttt{--partition centralized --persistent\_optimizer --lr\_schedule cosine --warmup\_rounds 3 --eval\_every 1}.
