@@ -1,0 +1,62 @@
+\section{Related Work}\label{sec:related}
+
+\subsection{Text-based person search with CLIP}
+
+The task and the CUHK-PEDES benchmark were introduced by Li \textit{et al.}~\citep{li2017personsearchnaturallanguage}. Early methods paired a convolutional visual backbone with a recurrent or BERT-based text encoder and aligned them with a cross-modal matching loss, DSSL~\citep{Zhu_2021} and SSAN~\citep{ding2021semanticallyselfalignednetworktexttoimage} being representative. A second generation replaced these separately pre-trained backbones with CLIP~\citep{radford2021learningtransferablevisualmodels}, whose encoders already share an embedding space: CFine~\citep{yan2022clipdrivenfinegrainedtextimageperson} transfers that knowledge through a multi-granularity interaction module, while IRRA~\citep{jiang2023crossmodalimplicitrelationreasoning} fine-tunes the CLIP dual encoder directly and outperforms the explicit local-alignment designs preceding it. A systematic study of how far a plain CLIP dual encoder can be taken through training recipe alone reaches the same conclusion~\citep{cao2023empiricalstudycliptextbased}.
+
+\subsection{IRRA and the Similarity Distribution Matching objective}\label{sec:irra}
+
+IRRA is our reference point: it defines the accuracy attainable by full fine-tuning, and the objective we adopt originates there. It keeps the CLIP dual encoder, taking the \texttt{[CLS]} representation of the vision transformer as the global image feature $f^{v}$ and the \texttt{[EOS]} representation of the text transformer as the global text feature $f^{t}$, and imposes three objectives on them.
+
+The principal one, and the only one we retain, is Similarity Distribution Matching (SDM). For a mini-batch of $N$ image--text pairs with matching labels $y_{i,j}\in\{0,1\}$ indicating whether image $i$ and description $j$ belong to the same identity, and with $sim(\mathbf{u},\mathbf{v})=\mathbf{u}^{\top}\mathbf{v}/\lVert\mathbf{u}\rVert\lVert\mathbf{v}\rVert$ the cosine similarity, the predicted matching probability is
+\begin{equation}\label{eq:sdm-p}
+p_{i,j}=\frac{\exp\!\big(sim(f^{v}_{i},f^{t}_{j})/\tau\big)}{\sum_{k=1}^{N}\exp\!\big(sim(f^{v}_{i},f^{t}_{k})/\tau\big)},
+\end{equation}
+with $\tau$ a temperature. Writing $q_{i,j}=y_{i,j}/\sum_{k}y_{i,k}$ for the normalized ground-truth distribution, the image-to-text loss is their Kullback--Leibler divergence, and the objective is the bidirectional sum,
+\begin{equation}\label{eq:sdm}
+\mathcal{L}_{i2t}=KL(\mathbf{p_{i}}\Vert\mathbf{q_{i}})=\frac{1}{N}\sum_{i=1}^{N}\sum_{j=1}^{N}p_{i,j}\log\!\left(\frac{p_{i,j}}{q_{i,j}+\epsilon}\right),\qquad
+\mathcal{L}_{sdm}=\mathcal{L}_{i2t}+\mathcal{L}_{t2i}.
+\end{equation}
+SDM generalizes the InfoNCE objective~\citep{oord2019representationlearningcontrastivepredictive} used to pre-train CLIP, which assumes exactly one positive per anchor, on the diagonal of the batch. That assumption is sound for web-scale caption data but false for person search, where one identity contributes several images and descriptions, so that genuine positives appear off the diagonal and would be treated as negatives. Deriving $q$ from identity labels rather than from batch position admits an arbitrary number of positives, and SDM reduces to InfoNCE when the label matrix is the identity matrix. Decisively for this work, it introduces no learnable parameters.
+
+The other two objectives are an implicit relation reasoning branch, which masks $15\%$ of the text tokens and predicts them through a cross-attention module conditioned on the unpooled image patches, thereby forcing the model to attend to the corresponding image region; and the identity loss standard in person re-identification~\citep{zheng2021dualpathconvolutionalimagetextembeddings}, which classifies both modalities with a shared linear classifier having one output per training identity. \Cref{sec:method} explains why neither survives the move to a federated setting.
+
+\subsection{Parameter-efficient methods for TBPS}\label{sec:petl}
+
+PETL freezes the pre-trained weights and trains a small number of inserted parameters. Three families recur: adapters~\citep{houlsby2019parameterefficienttransferlearningnlp}, which insert a bottleneck with a residual connection into a transformer layer; prefix tuning~\citep{li2021prefixtuningoptimizingcontinuousprompts}, which prepends learnable tokens to the keys and values of the attention module; and LoRA~\citep{hu2021loralowrankadaptationlarge}, which reparameterizes the update of a pre-trained projection $W$ as a low-rank product,
+\begin{equation}\label{eq:lora}
+W+\Delta W = W + \tfrac{\alpha}{r}BA,\qquad A\in\mathbb{R}^{r\times d_{\mathrm{in}}},\quad B\in\mathbb{R}^{d_{\mathrm{out}}\times r},\quad r\ll\min(d_{\mathrm{in}},d_{\mathrm{out}}).
+\end{equation}
+Two properties of LoRA matter here. Because $B$ is initialized to zero, the adapted model starts exactly at the pre-trained weights, which makes training stable on small datasets. And because $\Delta W$ merges into $W$ after training, LoRA adds no inference overhead, unlike adapters and prefixes, which remain in the forward path.
+
+CSKT~\citep{liu2024clipbasedsynergisticknowledgetransfer} first brought this paradigm to TBPS, training $12$M parameters. DM-Adapter~\citep{liu2025dmadapterdomainawaremixtureofadapterstextbased} argues that one adapter lacks the capacity for fine-grained pedestrian attributes and replaces it with a sparse mixture of adapter experts placed in parallel with the MLP sub-layer, routed by a Top-$K$ gate into which person-domain prompts are injected, with an auxiliary load-balancing term that prevents the routing from collapsing onto a few experts; it trains $16$M parameters. UP-Person~\citep{liu2025uppersonunifiedparameterefficienttransfer} instead unifies all three families in a single block, assigning each a distinct role --- LoRA and a scalable prefix capture local and task-specific information inside multi-head attention, while an adapter placed in parallel with layer normalization adjusts the global feature distribution --- and reaches the best published accuracy with $7.4$M parameters.
+
+UP-Person's placement of LoRA bears directly on our design. It adapts only the key and value projections, at rank $16$ on RSTPReid, and leaves the query projection untouched so that the prefix tokens, which are themselves concatenated to the keys and values, can act without competing with the low-rank update for the same weights. Expanding the attention computation under such a perturbation shows that the terms contributed by LoRA on $K$ and $V$ account for local appearance detail while the prefix contributes a separate task-specific term, so the restriction to $K,V$ is deliberate rather than incidental. Our baseline instead adapts all four attention projections at rank $4$, a generic configuration that covers the whole attention block but has neither prefix nor adapter alongside it. The two are therefore not directly comparable, and we treat the difference as a planned ablation rather than as a reimplementation.
+
+A second observation from UP-Person's ablation determines our choice of objective: SDM outperforms a plain contrastive objective by $2.13$ points of Rank-1 accuracy, whereas adding the identity and masked-language-modeling objectives yields almost no further gain while raising the trainable parameter count from $7.4$M to $52.3$M.
+
+\Cref{tab:ftvspeft} collects the published results. Two regularities motivate the design of \cref{sec:method}: parameter-efficient methods match or exceed full fine-tuning while training between $3.8\%$ and $8.2\%$ of IRRA's parameters, and their margin widens as the training set shrinks, from $0.79$ points of Rank-1 accuracy on CUHK-PEDES to $2.95$ on RSTPReid, the smallest benchmark.
+
+\begin{table}[t]
+\centering\small
+\caption{Published Rank-1 accuracy (\%) of full fine-tuning and parameter-efficient methods on CLIP ViT-B/16. Memory figures are those quoted in the respective papers and were not measured under a common protocol.}\label{tab:ftvspeft}
+\fit{\begin{tabular}{l l r r r r r}
+\toprule
+Method & Tuning & Trainable & CUHK-PEDES & ICFG-PEDES & RSTPReid & Memory (MB)\\
+\midrule
+CFine~\citep{yan2022clipdrivenfinegrainedtextimageperson} & full & 205M & 69.57 & 60.83 & 50.55 & 13\,570\\
+IRRA~\citep{jiang2023crossmodalimplicitrelationreasoning} & full & 195M & 73.38 & 63.46 & 60.20 & 7\,034\\
+CSKT~\citep{liu2024clipbasedsynergisticknowledgetransfer} & PETL & 12M & 69.70 & 58.90 & 57.75 & 2\,338\\
+DM-Adapter~\citep{liu2025dmadapterdomainawaremixtureofadapterstextbased} & PETL & 16M & 72.17 & 62.64 & 60.00 & 2\,952\\
+UP-Person~\citep{liu2025uppersonunifiedparameterefficienttransfer} & PETL & 7.4M & \textbf{74.17} & \textbf{65.02} & \textbf{63.15} & 3\,262\\
+\bottomrule
+\end{tabular}}
+\end{table}
+
+\subsection{Federated learning with low-rank adaptation}\label{sec:fedavg-rw}
+
+Federated learning distributes training over clients that each hold a private partition of the data. FedAvg~\citep{mcmahan2023communicationefficientlearningdeepnetworks} proceeds in rounds: the server broadcasts the current global parameters, each selected client trains locally for a fixed number of epochs, and the server replaces the global parameters by the average of those returned, weighted by the number of local examples. Raw data never leaves the client, and the volume uploaded per round is proportional to the number of trainable parameters --- which is precisely why PETL and federation combine well.
+
+Applying this to LoRA is conceptually simple. The backbone is frozen and identical on every client, so the only tensors exchanged are the factor pairs $(A,B)$ of each adapted projection, and the server averages them element-wise like any other parameter. The subtlety is that the quantity acting on the forward pass is not $A$ or $B$ individually but their product $\Delta W=\tfrac{\alpha}{r}BA$, and averaging the factors separately does not give the average of the products. The aggregation step is therefore no longer the linear operation that FedAvg's reasoning presumes, and this discrepancy --- analyzed in \cref{sec:bias} --- has attracted several remedies. FedIT~\citep{zhang2024buildingfederatedgptfederated} identifies it in federated instruction tuning; FFA-LoRA~\citep{sun2024improvingloraprivacypreservingfederated} freezes $A$ at its initialization so that only $B$ is averaged, which restores linearity; FLoRA~\citep{wang2024florafederatedfinetuninglarge} reconstructs the correct aggregate update on the server before re-factorizing it; and LoRA-FAIR~\citep{bian2025lorafairfederatedlorafinetuning} adds a server-side correction term. A separate difficulty is that unequal client sizes distort the aggregate, which Wang \textit{et al.}~\citep{wang2020tacklingobjectiveinconsistencyproblem} formalize as objective inconsistency and correct by normalized averaging; and clustered client distributions may be better served by one model per cluster than by a single global model~\citep{sattler2019clusteredfederatedlearningmodelagnostic,ghosh2021efficientframeworkclusteredfederated}.
+
+None of these works addresses text-based person search, and to the best of our knowledge no prior work combines federated learning, parameter-efficient fine-tuning, CLIP and TBPS; the status of that claim is revisited in \cref{sec:limits}.

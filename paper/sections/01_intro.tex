@@ -1,32 +1,11 @@
 \section{Introduction}\label{sec:intro}
 
-\subsection{Problem}
-In text-based person search (TBPS), the input is a text description of a person, for example ``a woman with a grey jacket and a red backpack''. The system ranks a gallery of person images by their match to the text \citep{li2017personsearchnaturallanguage}. The images come from surveillance cameras. Different owners operate the cameras, and they cannot move person images to a central server.
+Foundation models pre-trained at scale have become the default starting point for vision and language tasks, and adapting one to a downstream task is now the central engineering question rather than designing an architecture for it. Full fine-tuning answers that question by updating every parameter, which is affordable when training happens once, centrally, on pooled data. Federated learning~\citep{mcmahan2023communicationefficientlearningdeepnetworks} removes all three conditions: the data stays with its owners, training proceeds in rounds, and each round every client transmits a complete update. The cost of adaptation is therefore multiplied by the number of clients and by the number of rounds, and the subject of this thesis is the family of parameter-efficient techniques that make it tractable --- and the question, largely unexamined, of whether they still behave as intended once the averaging of a federated protocol is placed between them and the objective.
 
-Federated learning (FL) \citep{mcmahan2023communicationefficientlearningdeepnetworks} solves this problem. Each client trains on its local data and sends only a model update to the server. The server averages the updates.
+We pursue that question on a task where the federated constraint is not hypothetical. Text-based person search (TBPS) retrieves images of a pedestrian from a gallery given only a natural-language description of their appearance~\citep{li2017personsearchnaturallanguage}. The galleries that make the task useful are produced by surveillance networks operated by distinct institutions, and the images are personal data whose transfer is restricted. The usual assumption of a single pooled training corpus is therefore unrealistic in deployment, which motivates a federated formulation in which each site trains locally and transmits only model updates.
 
-The best TBPS models use CLIP \citep{radford2021learningtransferablevisualmodels}. Full fine-tuning of CLIP changes approximately 195M parameters (IRRA \citep{jiang2023crossmodalimplicitrelationreasoning}). In FL, each client sends its trainable parameters in each round. Thus, the number of trainable parameters is the communication cost. PEFT reduces this number.
+Accuracy in TBPS is at the same time dominated by models built on CLIP~\citep{radford2021learningtransferablevisualmodels}, most notably IRRA~\citep{jiang2023crossmodalimplicitrelationreasoning}, which puts a concrete figure on the cost just described: fine-tuning such a backbone in full updates on the order of $2\times10^{8}$ parameters, or roughly \numUplinkFull\,MiB of upload per client per round. Parameter-efficient transfer learning (PETL) resolves this by freezing the backbone and training a small inserted delta, and the PETL methods proposed for TBPS~\citep{liu2024clipbasedsynergisticknowledgetransfer,liu2025dmadapterdomainawaremixtureofadapterstextbased,liu2025uppersonunifiedparameterefficienttransfer} show that doing so costs no accuracy and in fact improves it on smaller benchmarks. The combination is thus doubly attractive for federation: it reduces communication and it regularizes training on the limited data held by any one client.
 
-\subsection{Gap}
-All PEFT methods for TBPS that we read (CSKT \citep{liu2024clipbasedsynergisticknowledgetransfer}, DM-Adapter \citep{liu2025dmadapterdomainawaremixtureofadapterstextbased}, UP-Person \citep{liu2025uppersonunifiedparameterefficienttransfer}) use centralized training. FL adds three problems:
-\begin{description}[leftmargin=2.4em,style=nextline]
-  \item[O1 -- Loss.] A loss with an identity classifier cannot be averaged. Each client has a different set of identities.
-  \item[O2 -- Aggregation.] FedAvg averages the LoRA factors $A$ and $B$ separately. The average of the products $BA$ is not equal to the product of the averages.
-  \item[O3 -- Non-IID data.] Each camera sees different people and different scenes.
-\end{description}
-We did not find a work that combines FL, PEFT, CLIP and TBPS. This is not a systematic survey yet (\cref{sec:limits}).
+These two lines of work have developed separately. Every PETL method for TBPS is designed and evaluated on a single pooled dataset, and moving one into a federated system raises three issues that do not arise centrally. The auxiliary objectives inherited from person re-identification are not all compatible with weight averaging, since an identity classifier has one output per training identity and clients hold different identity sets. The transmitted parameters need not be additive: for a low-rank update $\Delta W=BA$, averaging the factors separately does not reproduce the average of the products. And a camera-based partition, which is how surveillance data is actually owned, is strongly non-IID in both client size and identity coverage.
 
-\subsection{Research questions}
-\begin{description}[leftmargin=2.4em,style=nextline]
-  \item[RQ1] Which PEFT method and which loss from centralized TBPS work in FL?
-  \item[RQ2] How much accuracy do we lose because of FL (FL gap), non-IID data (non-IID gap) and PEFT (PEFT gap)?
-  \item[RQ3] Where does LoRA with FedAvg fail on non-IID data, and how can we correct it?
-\end{description}
-
-\subsection{Work done in this period}
-\begin{enumerate}[label=(W\arabic*)]
-  \item A literature study of IRRA, DM-Adapter and UP-Person (\cref{sec:lit}).
-  \item The pipeline \texttt{experiments/clip\_lora\_fedavg/} (\cref{sec:pipeline}).
-  \item One centralized LoRA run (C1-true) and two FL LoRA runs (B5) on RSTPReid (\cref{sec:setup}, \cref{sec:results}).
-  \item An analysis of the camera partition and of the loss of each client (\cref{sec:partition}, \cref{sec:hetero}).
-\end{enumerate}
+This report records the state of an ongoing thesis addressing that intersection. We review the TBPS literature with the federated constraint in view and identify the configuration that transfers --- a frozen CLIP backbone with the parameter-free Similarity Distribution Matching objective. We describe a baseline pipeline instantiating it, namely CLIP ViT-B/16 adapted by LoRA of rank four and aggregated by FedAvg, on RSTPReid partitioned into fifteen camera-level clients. We then report the first measurements: an analysis of the partition, a centralized reference, and the deficit of the federated run against it at matched rounds. We state explicitly which questions remain open and derive the experimental agenda from them.

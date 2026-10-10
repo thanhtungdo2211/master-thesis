@@ -1,0 +1,27 @@
+\section{Datasets and Evaluation Protocol}\label{sec:data}
+
+\Cref{tab:datasets} summarizes the three benchmarks used throughout the TBPS literature. They differ along two axes that matter here: the amount of training data, which determines how strongly full fine-tuning overfits, and the annotation density, which determines how many positive pairs a mini-batch contains and hence how informative \cref{eq:sdm} can be.
+
+\begin{table}[t]
+\centering\small
+\caption{The three standard TBPS benchmarks, as reported by the authors of DM-Adapter and UP-Person. This report uses RSTPReid; the other two are retained for the extension described in \cref{sec:next}.}\label{tab:datasets}
+\fit{\begin{tabular}{l r r r r r r}
+\toprule
+ & \multicolumn{3}{c}{Whole dataset} & \multicolumn{2}{c}{Training split} & \\
+\cmidrule(lr){2-4}\cmidrule(lr){5-6}
+Benchmark & Images & Identities & Descriptions & Images & Identities & Test identities\\
+\midrule
+CUHK-PEDES & 40\,206 & 13\,003 & 80\,412 & 34\,054 & 11\,003 & 1\,000\\
+ICFG-PEDES & 54\,522 & 4\,102 & 54\,522 & 34\,674 & 3\,102 & 1\,000\\
+RSTPReid & 20\,505 & 4\,101 & 41\,010 & 18\,505 & 3\,701 & 200\\
+\bottomrule
+\end{tabular}}
+\end{table}
+
+\paragraph{RSTPReid.} The experiments use RSTPReid~\citep{Zhu_2021}, derived from the MSMT17 re-identification dataset, comprising \numTotImg{} training images of \numTotID{} identities with two descriptions per image. Its images come from a network of fifteen cameras covering indoor and outdoor scenes at different times of day, and each identity is photographed by several distinct cameras. The test split holds $200$ identities, so the protocol ranks a gallery of $1{,}000$ images against $2{,}000$ textual queries.
+
+Two properties make it the natural starting point. It is the smallest of the three benchmarks, and it is on small benchmarks that parameter-efficient methods show their largest advantage (\cref{tab:ftvspeft}); since every client in a federated system holds only a fraction of the data, the small-data regime is the regime of interest. More importantly, the camera identifier is recoverable for every image, which permits a partition into clients that reflects how surveillance data is actually owned rather than an artificial random or Dirichlet split. \Cref{sec:setup} analyzes the resulting partition.
+
+\paragraph{CUHK-PEDES and ICFG-PEDES.} Neither is used in the present experiments, but both are relevant to the planned continuation. CUHK-PEDES~\citep{li2017personsearchnaturallanguage} is the original and most widely reported benchmark, itself aggregated from five earlier re-identification datasets and therefore heterogeneous in resolution and capture conditions, with two descriptions per image. ICFG-PEDES~\citep{ding2021semanticallyselfalignednetworktexttoimage} is the largest in image count, is also derived from MSMT17, and provides one considerably longer and more uniform description per image. Adding them serves two distinct purposes: running the same pipeline on all three would establish whether our conclusions depend on dataset scale, whereas treating each benchmark as a single client would realize a cross-dataset federation in which the identity spaces are genuinely disjoint --- a setting that the camera partition of RSTPReid, where identities are shared across clients, does not reproduce.
+
+\paragraph{Evaluation.} Following the three reference methods, retrieval is evaluated text-to-image: each description queries the full gallery, which is ranked by cosine similarity in the joint embedding space. We report R@1, R@5 and R@10, the proportion of queries for which a correct image appears in the top $k$; mAP, which averages precision over the complete ranking; and mINP, governed by the rank of the hardest correct match. The distinction between R@1 and mAP is not cosmetic here: with $2{,}000$ queries R@1 is a binomial estimate with a standard error of roughly $1.1$ percentage points, whereas mAP aggregates over entire rankings and is correspondingly more stable, a difference quantified on our own runs in \cref{sec:ceiling}. In the federated setting we evaluate the global model only, on a test split held by the server.

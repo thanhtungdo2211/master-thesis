@@ -1,0 +1,17 @@
+\section{Future Work and Conclusion}\label{sec:next}
+
+\subsection{Planned work}
+
+The continuation is organized so that the existing measurements are made trustworthy before new methods are introduced, since a methodological proposal can only be evaluated against a baseline whose variability is known.
+
+\emph{Consolidating the baseline.} Repeat the federated run under the centralized reference's configuration, to a flat curve and with at least three seeds, which converts the deficits of \cref{tab:flgap} into a controlled measurement with a known resolution; run a centralized baseline whose optimizer is rebuilt each epoch, to separate the cost of distributing the data from the cost of discarding optimizer state; label the test identities by cluster and report accuracy per cluster, with the centralized model evaluated on each group as a control, to test whether the loss divergence of \cref{sec:hetero} reaches retrieval accuracy; and select checkpoints by mAP rather than R@1, so as not to select on the noisiest available statistic.
+
+\emph{Completing the grid.} Run the IID control to measure the non-IID gap; run federated and centralized full fine-tuning under SDM alone to measure the parameter-efficiency gap separately from the effect of the reduced objective; and sweep the rank $r\in\{2,4,8,16\}$ with $\alpha=2r$, holding the scaling constant, to test the rank-limitation hypothesis of \cref{sec:bias} and trace accuracy against communication cost.
+
+\emph{Methodological extensions.} Evaluate FFA-LoRA, FLoRA and LoRA-FAIR within the same pipeline to correct the aggregation bias of \cref{eq:bias}; apply normalized averaging in the style of FedNova to correct the quadratic effective weighting; apply clustered federated learning over the two identity groups rather than forcing one model to serve both; port the unified PETL design of UP-Person and the mixture-of-adapters of DM-Adapter into the federated pipeline, to test whether adapters, prefixes and sparse routing aggregate as well as low-rank factors under non-IID data; and extend to CUHK-PEDES and ICFG-PEDES, both as additional benchmarks and as a cross-dataset federation of three clients with genuinely disjoint identity spaces.
+
+Two further tasks involve no experiments: a systematic survey of federated parameter-efficient fine-tuning for vision-language models, needed to substantiate or withdraw the novelty claim; and reproducing at least one published figure of UP-Person or DM-Adapter under our own protocol, to confirm that the reference points used throughout are comparable with our measurements.
+
+\subsection{Conclusion}
+
+The conclusion will be added in a future revision of this report.

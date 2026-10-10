@@ -86,33 +86,27 @@ def cell(x):
 
 
 def panel(idx, title, f):
-    f.write(f"\\midrule\n\\multicolumn{{6}}{{l}}{{\\textit{{{title}}}}}\\\\\n")
+    """One metric panel of the centralized-vs-federated table. Only the federated run that
+    reaches round 30 is reported; the second federated run is used solely for the per-client
+    analysis, so it does not appear here."""
+    f.write(f"\\midrule\n\\multicolumn{{4}}{{l}}{{\\textit{{{title}}}}}\\\\\n")
     for r in (5, 10, 15, 20, 25, 30):
         cen = c1[r][idx] if r in c1 else (plat_r1 if idx == 0 else plat_map)
         dag = "" if r in c1 else r"$^\dagger$"
         x1 = b1[r][idx] if r in b1 else None
-        x2 = b2[r][idx] if r in b2 else None
         g1 = None if x1 is None else cen - x1
-        g2 = None if x2 is None else cen - x2
-        f.write(f"{r} & {cen:.2f}{dag} & {cell(x1)} & {cell(x2)} & {cell(g1)} & {cell(g2)}\\\\\n")
+        f.write(f"{r} & {cen:.2f}{dag} & {cell(x1)} & {cell(g1)}\\\\\n")
 
 
 with open(os.path.join(OUT, "tab_flgap.tex"), "w") as f:
-    f.write("\\begin{tabular}{r ccc cc}\n\\toprule\n"
-            "Round & C1-true & B5 run 1 & B5 run 2 & $\\Delta_1$ & $\\Delta_2$\\\\\n")
+    f.write("\\begin{tabular}{r cc c}\n\\toprule\n"
+            "Round & Centralized & Federated & $\\Delta$\\\\\n")
     panel(0, "R@1 (\\%)", f)
     panel(3, "mAP (\\%)", f)
     f.write("\\bottomrule\n\\end{tabular}\n")
 
-# ---------------------------------------------------------------- noise between identical runs
-with open(os.path.join(OUT, "tab_noise.tex"), "w") as f:
-    f.write("\\begin{tabular}{r cc cc}\n\\toprule\n"
-            " & \\multicolumn{2}{c}{R@1} & \\multicolumn{2}{c}{mAP}\\\\\n"
-            "\\cmidrule(lr){2-3}\\cmidrule(lr){4-5}\n"
-            "Round & run 1 & run 2 & run 1 & run 2\\\\\n\\midrule\n")
-    for r in (5, 10, 15, 20):
-        f.write(f"{r} & {b1[r][0]:.2f} & {b2[r][0]:.2f} & {b1[r][3]:.2f} & {b2[r][3]:.2f}\\\\\n")
-    f.write("\\bottomrule\n\\end{tabular}\n")
+# Spread between the two federated runs. They share a seed, so this reflects execution
+# nondeterminism and is a lower bound on the variance over seeds. Reported in the text only.
 noise_r1 = max(abs(b1[r][0] - b2[r][0]) for r in (5, 10, 15, 20))
 noise_map = max(abs(b1[r][3] - b2[r][3]) for r in (5, 10, 15, 20))
 with open(os.path.join(OUT, "macros.tex"), "a") as f:
@@ -272,19 +266,31 @@ with open(os.path.join(OUT, "macros.tex"), "a") as f:
             f"\\newcommand{{\\numCOverR}}{{{c1[best_r1_round][0] - plat_r1:.2f}}}\n")
     f.write(f"\\newcommand{{\\numGapIrraLastR}}{{{i_r1 - b1[30][0]:.2f}}}\n")
 
+# Best checkpoint of each setting: the evaluation with the highest R@1, mAP breaking a tie.
+# Only the longer federated run is reported here; the second one is used in the per-client
+# analysis alone.
+c_best = c1[max(c1, key=lambda r: (c1[r][0], c1[r][3]))]
+b_best_round = max(b1, key=lambda r: (b1[r][0], b1[r][3]))
+b_best = b1[b_best_round]
 with open(os.path.join(OUT, "tab_vs_irra.tex"), "w") as f:
-    f.write("\\begin{tabular}{l r l cc cc}\n\\toprule\n"
-            " & & & \\multicolumn{2}{c}{Peak (best of $N$)} & \\multicolumn{2}{c}{Converged (mean)}\\\\\n"
-            "\\cmidrule(lr){4-5}\\cmidrule(lr){6-7}\n"
-            "Setting & Params & Loss & R@1 & mAP & R@1 & mAP\\\\\n\\midrule\n")
-    f.write(f"IRRA, full FT$^{{a}}$ & 195M & SDM+ID+MLM & {ib[1]:.2f} & {ib[4]:.2f} & "
-            f"{i_r1:.2f}\\,$\\pm$\\,{i_r1sd:.2f} & {i_map:.2f}\\,$\\pm$\\,{i_mapsd:.2f}\\\\\n")
-    f.write(f"C1-true: LoRA $r{{=}}4$, centralized$^{{b}}$ & 0.49M & SDM & {c1[best_r1_round][0]:.2f} & "
-            f"{c_best_map:.2f} & {plat_r1:.2f}\\,$\\pm$\\,{plat_r1_sd:.2f} & "
-            f"{plat_map:.2f}\\,$\\pm$\\,{plat_map_sd:.2f}\\\\\n")
-    f.write(f"B5 (run 1): LoRA $r{{=}}4$, FL camera$^{{c}}$ & 0.49M & SDM & -- & -- & "
-            f"{b1[30][0]:.2f} (r.30) & {b1[30][3]:.2f} (r.30)\\\\\n")
+    f.write("\\begin{tabular}{l r l ccccc}\n\\toprule\n"
+            "Setting & Params & Loss & R@1 & R@5 & R@10 & mAP & mINP\\\\\n\\midrule\n")
+
+    def row(name, params, loss, v):
+        f.write(f"{name} & {params} & {loss} & " + " & ".join(f"{x:.2f}" for x in v) + "\\\\\n")
+
+    # Published baseline row of the IRRA paper: the CLIP dual encoder alone, without
+    # IRRA's cross-attention and identity modules. Transcribed, not measured here.
+    row("CLIP ViT-B/16 baseline", "195M", "InfoNCE", (54.05, 80.70, 88.00, 43.41, 22.31))
+    row("IRRA, full fine-tuning", "195M", "SDM+ID+MLM", ib[1:6])
+    row("Centralized LoRA ($r{=}4$)", "0.49M", "SDM", c_best)
+    row("Federated LoRA ($r{=}4$)", "0.49M", "SDM", b_best)
     f.write("\\bottomrule\n\\end{tabular}\n")
+
+with open(os.path.join(OUT, "macros.tex"), "a") as f:
+    f.write(f"\\newcommand{{\\numFBestRound}}{{{b_best_round}}}\n"
+            f"\\newcommand{{\\numFBestR}}{{{b_best[0]:.2f}}}\n"
+            f"\\newcommand{{\\numFBestM}}{{{b_best[3]:.2f}}}\n")
 
 # ---------------------------------------------------------------- uplink table (params x 4 bytes)
 PUB = [("CFine", 205e6, "full"), ("IRRA", 195e6, "full"), ("CSKT", 12e6, "PETL"),

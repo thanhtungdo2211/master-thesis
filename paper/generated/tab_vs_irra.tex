@@ -1,11 +1,10 @@
-\begin{tabular}{l r l cc cc}
+\begin{tabular}{l r l ccccc}
 \toprule
- & & & \multicolumn{2}{c}{Peak (best of $N$)} & \multicolumn{2}{c}{Converged (mean)}\\
-\cmidrule(lr){4-5}\cmidrule(lr){6-7}
-Setting & Params & Loss & R@1 & mAP & R@1 & mAP\\
+Setting & Params & Loss & R@1 & R@5 & R@10 & mAP & mINP\\
 \midrule
-IRRA, full FT$^{a}$ & 195M & SDM+ID+MLM & 60.20 & 47.17 & 58.73\,$\pm$\,0.22 & 46.65\,$\pm$\,0.03\\
-C1-true: LoRA $r{=}4$, centralized$^{b}$ & 0.49M & SDM & 58.85 & 45.56 & 57.18\,$\pm$\,0.28 & 45.42\,$\pm$\,0.13\\
-B5 (run 1): LoRA $r{=}4$, FL camera$^{c}$ & 0.49M & SDM & -- & -- & 57.05 (r.30) & 44.63 (r.30)\\
+CLIP ViT-B/16 baseline & 195M & InfoNCE & 54.05 & 80.70 & 88.00 & 43.41 & 22.31\\
+IRRA, full fine-tuning & 195M & SDM+ID+MLM & 60.20 & 81.30 & 88.20 & 47.17 & 25.28\\
+Centralized LoRA ($r{=}4$) & 0.49M & SDM & 58.85 & 80.30 & 89.15 & 45.46 & 23.29\\
+Federated LoRA ($r{=}4$) & 0.49M & SDM & 57.05 & 79.30 & 87.15 & 44.63 & 22.65\\
 \bottomrule
 \end{tabular}

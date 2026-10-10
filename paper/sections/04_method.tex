@@ -1,0 +1,52 @@
+\section{Method}\label{sec:method}
+
+\subsection{Design and rationale}
+
+The pipeline is deliberately minimal: a frozen CLIP backbone, plain low-rank adaptation of the attention projections, Similarity Distribution Matching as the sole objective, and unmodified FedAvg. It accepts the aggregation bias of \cref{sec:bias} rather than correcting it, because its purpose is to establish a reference point --- what vanilla LoRA achieves under vanilla FedAvg on a non-IID camera partition --- against which later methodological proposals can be measured.
+
+Two choices follow from the federated requirement rather than from accuracy considerations. The first concerns the objective. Of IRRA's three losses, only SDM transfers unchanged: it has no learnable parameters and depends on identity labels solely through the relation $y_{i}=y_{j}$ within a mini-batch, which is invariant to relabeling. The identity loss cannot be used, because its shared classifier has one output per training identity, so clients holding different identity sets produce classifiers of incompatible shape, and even where the shapes agree the $i$-th column refers to a different person on each client, which makes the average meaningless. The implicit relation reasoning branch could in principle be federated, since its cross-attention and prediction head are identity-independent, but it adds roughly $45$M trainable parameters and hence about $172$\,MB of upload per client per round, which defeats the purpose of using PETL at all. UP-Person's ablation (\cref{sec:petl}), in which neither auxiliary objective helps a frozen-backbone model, indicates that little is forfeited. The second choice concerns the adapted parameters: LoRA is preferred over adapters and prefixes because its update merges into the frozen weights at inference, and because its factorized form makes the aggregation question concrete.
+
+\begin{figure}[t]
+\centering
+\fit{\begin{tikzpicture}[
+  box/.style={draw,rounded corners=2pt,align=center,font=\footnotesize,minimum height=8mm,fill=blue!5,draw=blue!50!black},
+  srv/.style={box,fill=green!8,draw=green!40!black,minimum width=36mm,minimum height=22mm},
+  frz/.style={box,fill=black!6,draw=black!50,text width=46mm,minimum height=22mm},
+  arr/.style={-{Stealth[length=2.2mm]},thick,draw=black!65}]
+\node[srv] (S) at (0,0) {\textbf{Server}\\global state $\theta^{(t)}$\\$=\{A_\ell,B_\ell\}_{\ell=1}^{96}$};
+\node[box,minimum width=34mm] (c1) at (6.2,1.6) {Client 1 (camera 1), $n_1$};
+\node[box,minimum width=34mm] (c2) at (6.2,0) {Client $k$, $n_k$};
+\node[box,minimum width=34mm] (c3) at (6.2,-1.6) {Client 15 (camera 15), $n_{15}$};
+\node[frz] (M) at (11.4,0) {\textbf{Local training}\\CLIP ViT-B/16 \textbf{frozen}\\LoRA on $W_q,W_k,W_v,W_o$\\$\mathcal{L}_{sdm}$, AdamW, $E=1$};
+\foreach \c in {c1,c2,c3}{
+  \draw[arr] ([yshift=2pt]S.east |- \c.west) -- ([yshift=2pt]\c.west);
+  \draw[arr,dashed,draw=red!60!black] ([yshift=-2pt]\c.west) -- ([yshift=-2pt]S.east |- \c.west);
+}
+\draw[arr,densely dotted] (c2.east) -- (M.west);
+\node[font=\scriptsize] at (3.1,2.35) {$\rightarrow$ broadcast $\theta^{(t)}$\quad\textcolor{red!60!black}{$\leftarrow$ return $\theta_k^{(t+1)},n_k$ (\numUplinkLoRA\,MiB)}};
+\node[align=center,font=\footnotesize,below=9mm of S,text width=60mm] (agg) {Aggregation: $\theta^{(t+1)}=\sum_{k}\frac{n_k}{N}\theta_k^{(t+1)}$,\\applied to each tensor independently};
+\draw[arr,dashed] (S) -- (agg);
+\end{tikzpicture}}
+\caption{One communication round. The CLIP backbone is frozen and shared; only the \numTrainable{} LoRA parameters are exchanged.}
+\label{fig:pipeline}
+\end{figure}
+
+\subsection{Model and adaptation}
+
+The backbone is the released CLIP ViT-B/16 checkpoint, with \numTotalParams{} parameters. Following IRRA, UP-Person and DM-Adapter, images are resized to $384\times128$ rather than to the square resolution CLIP was pre-trained on, so that the aspect ratio of a standing person is preserved and published numbers remain comparable; the pre-trained $14\times14$ positional-embedding grid is resampled by bicubic interpolation to the $24\times8$ grid this induces. Descriptions are tokenized to $77$ tokens. Training augments images by horizontal flipping, padding with random cropping, and random erasing, and each image contributes one example per associated description.
+
+Every linear projection inside multi-head attention --- query, key, value and output --- is replaced by its low-rank adapted counterpart following \cref{eq:lora}, with $r=4$ and $\alpha=8$. The pre-trained weight is frozen, $A$ is initialized Kaiming-uniform and $B$ to zero, so the initial model is exactly pre-trained CLIP. Across twelve layers, four projections and two encoders this yields $96$ adapted modules with independent factor pairs; all other parameters, including embeddings, layer normalization, the feed-forward sub-layers and the final projections, stay frozen. The count follows from the encoder widths: the vision encoder contributes $48\cdot r\,(768+768)=294{,}912$ parameters and the text encoder $48\cdot r\,(512+512)=196{,}608$, giving \textbf{\numTrainable{}} in total, or \numTrainPct\% of the backbone. Local training minimizes \cref{eq:sdm} with $\tau=0.02$ over the client's mini-batches. One deviation from IRRA should be recorded: the original additionally softens the label matrix using image identifiers, giving reduced weight to pairs that share an identity but not an image, whereas we use the binary identity relation alone; the effect of this simplification has not been measured.
+
+\subsection{Federated optimization and communication}
+
+Each round, the server broadcasts the global LoRA state, every client trains for one local epoch with AdamW and gradient clipping at norm $5$, and the server averages the returned factor tensors weighted by the number of local examples. All fifteen clients participate in every round. Each client builds a fresh optimizer, which is the correct treatment under FedAvg since clients are stateless and receive global parameters that have moved since they last trained; the learning rate is set on the server from the round index, so it is identical across clients within a round and keeps the federated and centralized runs on a common schedule. Mixed precision is used for the forward and backward passes while the loss is accumulated in single precision to avoid underflow in the softmax of \cref{eq:sdm-p}. Fifteen replicas of CLIP do not fit in the memory of a single accelerator, so the clients are simulated sequentially on one model instance; since every client starts from the same global state this is equivalent to parallel execution.
+
+The upload per client per round is \numUplinkLoRA\,MiB against \numUplinkFull\,MiB for full fine-tuning, a reduction by a factor of \numUplinkRatio; across fifteen clients a round costs \numUplinkRoundLoRA\,MiB in aggregate rather than \numUplinkRoundFull\,GiB. \Cref{tab:uplink} in \cref{app:tables} places this alongside the published methods. Since the LoRA update merges into the frozen weights, there is no inference-time overhead, and deployment uses a single global model: there is no client selection or routing at query time, and the per-client states exist only as inputs to the average.
+
+\subsection{Aggregation bias of low-rank factors}\label{sec:bias}
+
+The quantity influencing the forward pass is the product $\Delta W=s\,BA$ with $s=\alpha/r$, but FedAvg averages the factors independently, so the global update is
+\begin{equation}\label{eq:bias}
+\Delta W_{\mathrm{global}}=s\left(\sum_{k}\tfrac{n_{k}}{N}B_{k}\right)\left(\sum_{k}\tfrac{n_{k}}{N}A_{k}\right)\;\neq\;s\sum_{k}\tfrac{n_{k}}{N}B_{k}A_{k}=\overline{\Delta W},
+\end{equation}
+the discrepancy consisting of cross terms $B_{k}A_{k'}$ with $k\neq k'$ that pair the factors of one client with those of another. Three consequences follow, in increasing order of severity. The aggregation is no longer linear, so the standard convergence argument for FedAvg does not transfer. The correct aggregate $\overline{\Delta W}$ is a combination of $K$ matrices of rank at most $r$ and may therefore have rank up to $Kr$, whereas $\overline{B}\,\overline{A}$ has rank at most $r$ by construction, so aggregation compresses the space of achievable updates exactly when clients adapt in different directions. And the factorization is not unique --- for any invertible $T$, $(BT)(T^{-1}A)$ realizes the same $\Delta W$ --- so two clients may converge to identical updates while holding entirely different factors, and averaging in factor space then combines quantities expressed in different coordinate systems. The baseline accepts all three; the remedies surveyed in \cref{sec:fedavg-rw} are the natural candidates for the methodological contribution of the thesis.

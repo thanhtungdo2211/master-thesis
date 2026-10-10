@@ -1,6 +1,6 @@
 # paper/: Progress report (LaTeX)
 
-This folder contains the thesis progress report. The report is in English and uses ASD-STE100 (Simplified Technical English). Edit the files locally, build the PDF, then pack the folder into a `.zip` file and upload it to Overleaf for supervisor review.
+This folder contains the thesis progress report, written in English in the formal register of a conference or journal paper. Edit the files locally, build the PDF, then pack the folder into a `.zip` file and upload it to Overleaf for supervisor review.
 
 ---
 
@@ -10,14 +10,15 @@ This folder contains the thesis progress report. The report is in English and us
 paper/
 ├── main.tex              # main file: preamble, title, abstract, \input of each section
 ├── sections/             # CONTENT: one file for each section; edit the text here
-│   ├── 01_intro.tex
-│   ├── 02_literature.tex
-│   ├── 03_pipeline.tex
-│   ├── 04_setup.tex
-│   ├── 05_results.tex
-│   ├── 06_limits.tex
-│   ├── 07_next.tex       # Next steps + Conclusion
-│   └── A_appendix.tex
+│   ├── 01_intro.tex      # Introduction
+│   ├── 02_related.tex    # Related Work (TBPS, IRRA, PETL methods, FedAvg)
+│   ├── 03_data.tex       # Datasets and Evaluation Protocol
+│   ├── 04_method.tex     # Method (pipeline, LoRA, SDM, FedAvg, aggregation bias)
+│   ├── 05_setup.tex      # Experimental Setup (camera partition, settings compared)
+│   ├── 06_results.tex    # Results
+│   ├── 07_limits.tex     # Discussion and Limitations
+│   ├── 08_next.tex       # Future Work + Conclusion
+│   └── A_appendix.tex    # Additional tables
 ├── refs.bib              # bibliography (add entries only with fetch_bibtex.sh, see section 5)
 ├── results/              # SOURCE DATA: copies of logs/CSVs from data/runs/, data/irra_rtsp/, ...
 ├── scripts/gen_tables.py # makes the tables and numbers from results/ into generated/
@@ -54,37 +55,39 @@ Open the related file in `sections/` and edit it directly:
 | To change | File |
 |---|---|
 | Title, author names, abstract | `main.tex` |
-| Problem, gap, research questions, work done | `sections/01_intro.tex` |
-| Literature (PEFT vs. full fine-tuning, SDM) | `sections/02_literature.tex` |
-| Pipeline `clip_lora_fedavg` | `sections/03_pipeline.tex` |
-| Data partition, runs | `sections/04_setup.tex` |
-| Results: C1-true, B5, client loss | `sections/05_results.tex` |
-| Limitations, claims and evidence | `sections/06_limits.tex` |
-| Next steps, conclusion | `sections/07_next.tex` |
+| Problem, motivation, contributions | `sections/01_intro.tex` |
+| Related work; formulas of IRRA, DM-Adapter, UP-Person, FedAvg | `sections/02_related.tex` |
+| Dataset descriptions, evaluation metrics | `sections/03_data.tex` |
+| Pipeline, LoRA, SDM loss, FedAvg, aggregation bias | `sections/04_method.tex` |
+| Camera partition, settings compared | `sections/05_setup.tex` |
+| Results: centralized reference, cost of federation, client loss | `sections/06_results.tex` |
+| Limitations, claims and evidence | `sections/07_limits.tex` |
+| Future work, conclusion | `sections/08_next.tex` |
 
-**Open item:** write the names in `main.tex`, line `\author{\todo{student name} ... \todo{supervisor name}}`.
 
 ### 3.2 Add a new section
-1. Make `sections/08_xxx.tex`. Start it with `\section{...}\label{sec:xxx}`.
-2. Add `\input{sections/08_xxx}` to `main.tex` at the correct position.
+1. Make `sections/09_xxx.tex`. Start it with `\section{...}\label{sec:xxx}`.
+2. Add `\input{sections/09_xxx}` to `main.tex` at the correct position.
 
 ### 3.3 Available macros (defined in `main.tex`)
 
 | Macro | Use |
 |---|---|
-| `\result{...}` | blue "Result." box for a main conclusion |
-| `\caution{...}` | orange "Caution." box for a limitation |
 | `\fit{...}` | makes a wide table or figure smaller to fit the text width |
 | `\todo{...}` | red note `[TODO: ...]` |
-| `\pp` | unit "pp" (percentage points), for example `1.55\pp` |
-| `\numXxx` | generated number from `generated/macros.tex`, for example `\numCPlatR` = converged R@1 of C1-true |
+| `\numXxx` | generated number from `generated/macros.tex`, for example `\numCPlatR` = converged R@1 of the centralized run |
 
-Cross-references: `\cref{sec:results}`, `\cref{tab:runs}`, `\cref{fig:curves}`. Citations: `\citep{<key>}`, with `<key>` from `refs.bib`.
+Cross-references: `\cref{sec:results}`, `\cref{tab:flgap}`, `\cref{fig:group}`. Citations: `\citep{<key>}`, with `<key>` from `refs.bib`.
 
-### 3.4 Writing rules (ASD-STE100)
-- Short sentences: maximum approximately 20 words (procedures) and 25 words (descriptions). One sentence, one idea.
-- Active voice, present tense. Use the same term for the same thing (always *client*, *round*, *centralized run*, *FL run*).
-- Do not write a claim that is stronger than the evidence. Each new claim must have a row in the table `tab:claims` (`06_limits.tex`).
+### 3.4 Writing rules
+- Formal academic register, as in a conference or journal paper: connected prose in paragraphs, not bullet lists, and no telegraphic sentences.
+- American spelling throughout (*centralized*, *normalization*, *optimizer*, *modeling*), since the text is now consistent in that convention.
+- Keep terminology fixed: *client*, *round*, *centralized reference*, *federated run*, *low-rank adaptation*.
+- Every formula taken from another paper must match that paper's own notation, and must cite it.
+- Do not write a claim that is stronger than the evidence. Each new claim needs a row in the table `tab:claims` (`07_limits.tex`).
+- Do not mention source-code paths, script names or configuration file names in the paper body; those belong in this README.
+- Name the training settings descriptively (*centralized LoRA*, *federated LoRA run 1*), never by internal run codes.
+- This is a progress report, so keep it short: prefer cutting a paragraph to adding one.
 
 ### 3.5 Common errors
 
@@ -109,7 +112,7 @@ All experimental numbers come from `results/`. **Do not type numbers by hand int
    ```
 2. For a new run (not only a replaced file): change `scripts/gen_tables.py` so that it reads the file and writes new macros or tables into `generated/`.
 3. Run `python3 scripts/gen_tables.py`, then build again (section 2).
-4. Make sure that the related text in `sections/05_results.tex` is still correct for the new numbers.
+4. Make sure that the related text in `sections/06_results.tex` is still correct for the new numbers.
 
 Note: `gen_tables.py` reads `../data/runs/B5_camera_lora4_v2_20260709/args.json` for the parameter counts. Thus, the script runs only inside the `master-thesis` repository, not on Overleaf. For this reason, the zip file must always contain `generated/`.
 
@@ -178,15 +181,15 @@ Tell the assistant to read these files before it makes changes:
 Include these rules in the request, or keep them in the project instruction file:
 1. Do not invent numbers. All experimental numbers come from `results/` through `scripts/gen_tables.py`.
 2. Each `\cite`/`\citep` key must exist in `refs.bib`. Add entries only with `fetch_bibtex.sh` (section 5).
-3. The code in `experiments/clip_lora_fedavg/` is the reference for the method description. Check the text against the code.
-4. Follow the writing rules in section 3.4 (ASD-STE100).
+3. The pipeline source in the repository is the reference for the method description. Check the text against it, but do not cite file or script names in the paper.
+4. Follow the writing rules in section 3.4.
 5. Do not edit `generated/` or `build/` by hand.
 6. After each change, build with `latexmk -pdf -outdir=build main.tex` and make sure that there are no errors and no `??`.
 
 ### 7.3 Example requests
-- "Change section 5.3 in `paper/sections/05_results.tex` as the notes in `paper/REVIEW_NOTES.md` tell you."
+- "Change section 6.3 in `paper/sections/06_results.tex` as the notes in `paper/REVIEW_NOTES.md` tell you."
 - "Add the rank-sweep run to `paper/results/`, update `gen_tables.py`, and add a results table."
-- "Make the abstract in `paper/main.tex` shorter. Keep ASD-STE100."
+- "Make the abstract in `paper/main.tex` shorter, keeping the formal register."
 
 ### 7.4 After the assistant changes the files
 1. Read the diff (`git diff paper/`). Make sure that all numbers and claims are correct.

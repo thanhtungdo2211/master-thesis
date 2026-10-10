@@ -1,7 +1,6 @@
 % Progress report: PEFT for foundation models in federated learning -- text-based person search.
 % Build:  cd paper && python3 scripts/gen_tables.py && latexmk -pdf -outdir=build main.tex
 % Overleaf: compiler = pdfLaTeX (default). Do not run a single pdflatex pass: it gives "??".
-% Writing style: ASD-STE100 (Simplified Technical English).
 \documentclass[11pt,a4paper]{article}
 
 \usepackage[T1]{fontenc}
@@ -9,7 +8,7 @@
 \usepackage{mathptmx}
 \usepackage[scaled=0.92]{helvet}
 \usepackage{courier}
-\usepackage{amsmath,amssymb}
+\usepackage{amsmath,amssymb,bm}
 \usepackage[a4paper,margin=2.5cm]{geometry}
 \usepackage{microtype}
 \usepackage{booktabs,array,tabularx}
@@ -19,7 +18,6 @@
 \setlist{itemsep=1pt,topsep=3pt}
 \usepackage{caption}
 \captionsetup{font=small,labelfont=bf}
-\usepackage[ruled,vlined,linesnumbered]{algorithm2e}
 \usepackage{tikz}
 \usetikzlibrary{positioning,arrows.meta,calc}
 \usepackage{pgfplots}
@@ -27,25 +25,22 @@
 \pgfplotsset{compat=1.17}
 \usepackage{float}
 \usepackage[export]{adjustbox}
-\usepackage{tcolorbox}
 \usepackage[numbers,sort&compress]{natbib}
 \usepackage[colorlinks=true,linkcolor=blue!50!black,citecolor=green!40!black,urlcolor=blue!50!black]{hyperref}
-\usepackage[nameinlink,capitalise]{cleveref}
+\usepackage[nameinlink,capitalize]{cleveref}
 
 % allow line breaks after "_" inside \texttt
 \renewcommand{\_}{\textunderscore\allowbreak{}}
 \newcommand{\fit}[1]{\adjustbox{max width=\textwidth}{#1}}
-\newcommand{\pp}{\,pp}
 \newcommand{\todo}[1]{\textcolor{red!70!black}{\textbf{[TODO: #1]}}}
-\newcommand{\result}[1]{\begin{tcolorbox}[colback=blue!4,colframe=blue!45!black,boxrule=0.5pt,arc=1.5pt,left=4pt,right=4pt,top=3pt,bottom=3pt]\textbf{Result.} #1\end{tcolorbox}}
-\newcommand{\caution}[1]{\begin{tcolorbox}[colback=orange!7,colframe=orange!60!black,boxrule=0.5pt,arc=1.5pt,left=4pt,right=4pt,top=3pt,bottom=3pt]\textbf{Caution.} #1\end{tcolorbox}}
 
 % experimental numbers: generated from results/*.csv by scripts/gen_tables.py
 \input{generated/macros.tex}
 
-\title{\bfseries Parameter-Efficient Fine-Tuning of Foundation Models\\in Federated Learning for Text-Based Person Search\\[4pt]
-\large Progress Report}
-\author{\todo{student name} \qquad Supervisor: \todo{supervisor name}}
+\title{\bfseries Research and Development of Parameter-Efficient Fine-Tuning\\Techniques for Foundation Models in Federated Learning\\[4pt]
+\large Progress Report --- Application to Text-Based Person Search}
+\author{Do Thanh Tung \quad\textit{(MSc student)}\\[2pt]
+Supervisors: Assoc.\ Prof.\ Dr.\ Tran Thi Thanh Hai, \quad Dr.\ Do Thi Ngoc Diep}
 \date{\today}
 
 \begin{document}
@@ -53,27 +48,20 @@
 
 \begin{abstract}
 \noindent
-This report gives the status of the thesis work. The task is text-based person search (TBPS): find a person in camera images from a text description. Camera owners cannot share their images, so we use federated learning (FL). The model is CLIP ViT-B/16, which is too large to send in each FL round, so we use parameter-efficient fine-tuning (PEFT).
-We did three tasks.
-(1)~We read the TBPS literature. It shows that PEFT is equal to or better than full fine-tuning, and that the SDM loss alone is sufficient.
-(2)~We built the pipeline \texttt{clip\_lora\_fedavg}: CLIP + LoRA ($r{=}4$) + SDM loss + FedAvg, on RSTPReid split into 15 camera clients.
-(3)~We trained one centralized LoRA model and two FL LoRA models.
-LoRA trains \numTrainPct\% of the parameters and sends \numUplinkLoRA\,MiB per client per round (full fine-tuning: \numUplinkFull\,MiB).
-The centralized LoRA model converges at R@1 \numCPlatR{} and mAP \numCPlatM. This is \numGapIrraConvR\pp{} R@1 below IRRA (full fine-tuning, three losses) on the same converged measure.
-The FL model gets near the centralized result when the number of rounds increases.
-The training loss of the clients separates into two groups, and the gap between the groups increases (\numGapFirst{} to \numGapLast).
-The report also gives the items that we did not measure yet.
+Foundation models pre-trained at scale are now the default starting point for vision and language tasks, but adapting one by full fine-tuning updates hundreds of millions of parameters. Federated learning pays that cost repeatedly rather than once, since the data cannot be pooled and every client transmits its update in every round: full fine-tuning of a CLIP-scale backbone would require on the order of \numUplinkFull\,MiB per client per round. Parameter-efficient fine-tuning, which freezes the backbone and trains a small inserted delta, is the natural remedy, and this thesis investigates how such techniques behave once training is federated. We pursue the question on text-based person search, which retrieves images of a pedestrian from a gallery given a natural-language description. The task is a fitting instance: its galleries are genuinely distributed across surveillance installations whose operators cannot pool their imagery, its accuracy is dominated by CLIP-scale backbones, and yet every parameter-efficient method proposed for it assumes centralized training. This report documents the state of an ongoing thesis addressing that intersection. We review the literature with the federated constraint in view and identify the configuration that transfers --- a frozen CLIP backbone with the parameter-free Similarity Distribution Matching objective --- then describe a baseline pipeline instantiating it, namely CLIP ViT-B/16 adapted by LoRA of rank four and aggregated by FedAvg, on RSTPReid partitioned into fifteen camera-level clients. The adaptation trains \numTrainPct\% of the backbone parameters and transmits \numUplinkLoRA\,MiB per client per round. Trained centrally it converges at \numCPlatR{} Rank-1 accuracy and \numCPlatM{} mAP, \numGapIrraConvR{} points of Rank-1 below full fine-tuning with three objectives when both are read on a converged rather than a best-of-$N$ basis, and the federated runs approach this reference as rounds accumulate. The camera partition proves non-IID in two distinct regimes. We state which conclusions the present evidence supports, which remain open, and derive the experimental agenda from the latter.
 \end{abstract}
 
+\setcounter{tocdepth}{1}
 \tableofcontents
 
 \input{sections/01_intro}
-\input{sections/02_literature}
-\input{sections/03_pipeline}
-\input{sections/04_setup}
-\input{sections/05_results}
-\input{sections/06_limits}
-\input{sections/07_next}
+\input{sections/02_related}
+\input{sections/03_data}
+\input{sections/04_method}
+\input{sections/05_setup}
+\input{sections/06_results}
+\input{sections/07_limits}
+\input{sections/08_next}
 
 \bibliographystyle{unsrtnat}
 \bibliography{refs}

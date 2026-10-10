@@ -1,0 +1,31 @@
+\section{Results}\label{sec:results}
+
+\subsection{Centralized reference}\label{sec:ceiling}
+
+The centralized run establishes what the configuration achieves when the data is not distributed. Averaged over the final six epochs it reaches $\numCPlatR\pm\numCPlatRsd$ Rank-1 accuracy and $\numCPlatM\pm\numCPlatMsd$ mAP. Its training loss falls from \numCFirstLoss{} to \numCFinalLoss{} and is still decreasing at the end, while the test metrics have been flat for roughly twelve epochs: the model is not limited by the capacity of the adaptation but has begun to memorize the training set, so neither a larger rank nor a longer schedule should be expected to raise this ceiling.
+
+A second observation governs every comparison that follows. Over the converged epochs the coefficient of variation of R@1 is \numCVR{} against \numCVM{} for mAP, so Rank-1 accuracy is some $2.6$ times noisier, for the structural reason given in \cref{sec:data}. Selecting a checkpoint by peak R@1 therefore selects the most favorable of many noisy measurements: the maximum of \numCBestR{} at epoch \numCBestRround{} exceeds the converged level by \numCOverR{} points, yet its mAP of \numCBestRmAP{} is below the best mAP of \numCBestM{} at epoch \numCBestMround{}. We report converged means throughout and label peak values as such.
+
+For context, \cref{tab:vsirra} places this run beside the published figures of the IRRA paper. The same distinction applies there: IRRA's $60.20$ is a maximum over \numIrraNEval{} evaluations, attained at epoch \numIrraBestEp{}, whereas the converged level of that run is \numIrraConvR{}. Read converged against converged, low-rank adaptation of a frozen backbone trails full fine-tuning by \numGapIrraConvR{} points of Rank-1 accuracy and \numGapIrraConvM{} points of mAP while training \numTrainPct\% of the parameters, and that residual gap conflates the restriction to low-rank adaptation with the restriction to a single objective, which the present data cannot separate. The comparison is secondary here, since the purpose of the federated experiments is the comparison with the centralized reference, to which we now turn.
+
+\begin{table}[t]
+\centering\small
+\caption{Best checkpoint of each setting on RSTPReid, in percent, selected by Rank-1 accuracy over all evaluations of the run. The first two rows are the baseline and the proposed method of the IRRA paper; the last two are our own runs, each with a single seed.}\label{tab:vsirra}
+\fit{\input{generated/tab_vs_irra.tex}}
+\end{table}
+
+\subsection{The cost of federation}\label{sec:flgap}
+
+\Cref{tab:flgap} compares the two settings at matched rounds, which is also matched computation: one federated round comprises $571$ optimization steps summed over the fifteen clients against $578$ in one centralized epoch. In mAP the deficit contracts monotonically, from $6.04$ points at round~$5$ to $0.79$ at round~$30$, and the federated run is still improving when it stops; in R@1 it closes to $0.13$ points by round~$25$. This is consistent with federation delaying convergence rather than lowering the attainable accuracy --- a favorable reading, since the price would then be paid in rounds, and rounds are what low-rank adaptation makes cheap --- but it does not establish it, because the run stopped before plateauing and the residual deficit is small relative to the variability of the pipeline. A second federated run with the same configuration and the same seed disagrees with this one by up to \numNoiseR{} points of R@1 and \numNoiseM{} points of mAP at matched rounds. Since that spread reflects the nondeterminism of execution alone, and variation over seeds can only add to it, roughly $1.7$ points of Rank-1 accuracy is a lower bound on the resolution of this comparison; the R@1 deficits from round~$20$ onwards fall below that bound, whereas the mAP deficits remain above their corresponding bound until round~$30$.
+
+\begin{table}[t]
+\centering\small
+\caption{Deficit of the federated run relative to the centralized reference at matched rounds, in percentage points, where $\Delta$ is the centralized value minus the federated one. $^\dagger$The centralized run has converged by this point, so its converged mean is used.}\label{tab:flgap}
+\fit{\input{generated/tab_flgap.tex}}
+\end{table}
+
+A further part of the deficit is not attributable to the distribution of the data at all. The centralized reference keeps one optimizer for the whole run, so the Adam moments accumulate over every step of training, whereas each federated client builds a fresh optimizer in every round. That is the correct treatment under FedAvg --- clients are stateless, may be absent from a round, and receive global parameters that have moved since they last trained, so stale moments would point in the wrong direction --- but it is a structural handicap that no federated system can avoid, and it inflates the measured gap by an unknown amount. Isolating it requires a centralized run whose optimizer is rebuilt each epoch, which is the second task of \cref{sec:next}. On the communication axis, by contrast, the comparison is unambiguous: thirty rounds with fifteen clients transmit \numUplinkRthirty\,MiB in total, against an estimated \numUplinkFullThirty\,GiB for the same schedule under full fine-tuning.
+
+\subsection{Divergence between clients}\label{sec:hetero}
+
+The per-client analysis of the federated run will be added in a future revision of this report.
