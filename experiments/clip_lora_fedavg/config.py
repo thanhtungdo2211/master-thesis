@@ -69,6 +69,11 @@ def get_args(argv=None):
                         "code path and rebuilds AdamW each round -- valid, and the right choice "
                         "when you want C1 vs FL to differ ONLY in partitioning.")
     p.add_argument("--temperature", type=float, default=0.02, help="SDM temperature")
+    p.add_argument("--loss", type=str, default="sdm", choices=["sdm", "infonce", "mpce"],
+                   help="'sdm' = IRRA's SDM, KL(p||q) (every run before this flag). "
+                        "'infonce' = CLIP diagonal-only contrastive, ignores pid. "
+                        "'mpce' = multi-positive CE, KL(q||p): same q as SDM, opposite KL "
+                        "direction. The last two are loss ablations.")
     p.add_argument("--num_workers", type=int, default=2)
     p.add_argument("--amp", action="store_true", default=True)
     p.add_argument("--no_amp", dest="amp", action="store_false")

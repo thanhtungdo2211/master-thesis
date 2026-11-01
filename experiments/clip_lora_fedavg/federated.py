@@ -17,7 +17,7 @@ import math
 import torch
 from torch.utils.data import DataLoader
 
-from .loss import sdm_loss
+from .loss import LOSSES
 from .lora import load_trainable_state_dict, trainable_state_dict
 
 
@@ -88,6 +88,7 @@ def train_one_client(model, global_state, dataset, args, device, scaler=None,
         num_workers=args.num_workers, drop_last=True, pin_memory=True,
     )
     logit_scale = 1.0 / args.temperature
+    loss_fn = LOSSES[args.loss]
 
     total_loss, n_step = 0.0, 0
     for _ in range(args.local_epochs):
@@ -104,7 +105,7 @@ def train_one_client(model, global_state, dataset, args, device, scaler=None,
                 with torch.autocast(device_type="cuda", dtype=torch.float16):
                     i_f = model.get_image_features(pixel_values=pixel)
                     t_f = model.get_text_features(input_ids=ids, attention_mask=mask)
-                    loss = sdm_loss(i_f.float(), t_f.float(), pid, logit_scale)
+                    loss = loss_fn(i_f.float(), t_f.float(), pid, logit_scale)
                 scaler.scale(loss).backward()
                 scaler.unscale_(optimizer)
                 torch.nn.utils.clip_grad_norm_(params, 5.0)
@@ -113,7 +114,7 @@ def train_one_client(model, global_state, dataset, args, device, scaler=None,
             else:
                 i_f = model.get_image_features(pixel_values=pixel)
                 t_f = model.get_text_features(input_ids=ids, attention_mask=mask)
-                loss = sdm_loss(i_f, t_f, pid, logit_scale)
+                loss = loss_fn(i_f, t_f, pid, logit_scale)
                 loss.backward()
                 torch.nn.utils.clip_grad_norm_(params, 5.0)
                 optimizer.step()

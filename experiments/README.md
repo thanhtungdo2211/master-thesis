@@ -115,7 +115,7 @@ python -m clip_lora_fedavg.main --root /path/to/RSTPReid --out_dir runs/smoke \
   --rounds 2 --eval_every 2 --max_clients_per_round 3 --debug_steps 3 --batch_size 16
 ```
 
-If you already have a partition file from your own `rstpreid_federated.py`, use it directly:
+If you already have a partition file from your own `data/scripts/rstpreid_federated.py`, use it directly:
 ```bash
 --partition_file /path/to/partition_camera.json   # {client_id: [image_index,...]}
 ```

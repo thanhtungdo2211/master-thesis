@@ -126,6 +126,7 @@ def main(argv=None):
               f"{n_per_round}/round | "
               f"{args.local_epochs} local epoch(s) each")
     print(f"[setting] optimizer: AdamW {opt_mode}")
+    print(f"[setting] loss: {args.loss}")
     if args.lr_schedule == "constant":
         print(f"[setting] lr: CONSTANT {args.lr:.2e} for all {args.rounds} rounds "
               f"(no warmup, no decay -- legacy behaviour)")
@@ -145,7 +146,8 @@ def main(argv=None):
         with open(args_path) as f:
             prev = json.load(f)
         watched = ("lr", "lr_schedule", "warmup_rounds", "lr_min_ratio", "rounds",
-                   "persistent_optimizer", "batch_size", "lora_rank", "lora_alpha")
+                   "persistent_optimizer", "batch_size", "lora_rank", "lora_alpha",
+                   "loss")
         changed = {k: (prev.get(k, "<absent>"), getattr(args, k))
                    for k in watched if prev.get(k, "<absent>") != getattr(args, k)}
         if changed:
